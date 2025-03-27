@@ -70,19 +70,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-def check_file_access_permission(user: User, file_info, download_code: Optional[str] = None):
+def check_file_access_permission(user: Optional[User], file_info, download_code: Optional[str] = None):
     """
     检查用户是否有权限访问文件内容（下载或预览）
     
     Args:
-        user: 当前用户
+        user: 当前用户（可能为None，表示未登录用户）
         file_info: 文件信息对象
         download_code: 下载码（可选）
         
     Raises:
         HTTPException: 当用户没有权限访问文件时
     """
-    # 如果文件不是私密的，允许访问
+    # 如果文件不是私密的，任何人（包括未登录用户）都可以访问
     if not file_info.is_private:
         return True
         

@@ -66,22 +66,52 @@ function PreviewPage() {
     }
   };
 
+  // 检查文件是否存在并可访问
+  const checkFileExists = async (url, headers = {}) => {
+    try {
+      await axios.head(url, { headers });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  };
+
   // 获取文件基本信息
   useEffect(() => {
     const fetchFileInfo = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`/api/files/${fileId}/info`);
+        let url = `/api/files/${fileId}/info`;
+
+        // 如果URL中有下载码，将其添加到请求中
+        if (downloadCode) {
+          url += `?download_code=${downloadCode}`;
+        }
+
+        // 获取token（如果用户已登录）
+        const token = localStorage.getItem('token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const response = await axios.get(url, { headers });
         setFileInfo(response.data);
         
         // 如果URL中有下载码，自动填入表单
         if (downloadCode) {
           downloadForm.setFieldsValue({ downloadCode });
+          // 保存下载码以便后续使用
+          setSavedDownloadCode(downloadCode);
         }
       } catch (error) {
         console.error('获取文件信息失败', error);
         if (error.response?.status === 404) {
           setFileError('文件不存在或已被删除');
+        } else if (error.response?.status === 403) {
+          if (error.response?.data?.detail?.includes('private file')) {
+            setFileError('这是一个私密文件，请输入下载码访问');
+            setCodeModalVisible(true);
+          } else {
+            setFileError('没有权限访问此文件');
+          }
         } else {
           setFileError('获取文件信息失败');
         }
@@ -110,7 +140,13 @@ function PreviewPage() {
       const response = await axios({
         url,
         method: 'GET',
-        responseType: 'blob'
+        responseType: 'blob',
+        // 添加超时设置
+        timeout: 30000,
+        // 添加错误处理
+        validateStatus: function (status) {
+          return status >= 200 && status < 300; // 默认值
+        }
       });
 
       // 创建预览窗口
@@ -119,24 +155,47 @@ function PreviewPage() {
       const fileUrl = URL.createObjectURL(blob);
 
       // 根据文件类型选择预览方式
-      if (fileType === 'text/plain') {
+      if (fileType === 'text/plain' || fileType === 'text/html') {
         // 文本文件
         const reader = new FileReader();
         reader.onload = function (e) {
-          Modal.info({
-            title: '文件预览',
-            width: '80%',
-            content: (
-              <pre style={{
-                maxHeight: '60vh',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word'
-              }}>
-                {e.target.result}
-              </pre>
-            ),
-          });
+          // 检查是否是HTML内容
+          if (fileType === 'text/html' || e.target.result.trim().startsWith('<!DOCTYPE html>')) {
+            // 创建iframe展示HTML内容
+            const iframe = document.createElement('iframe');
+            iframe.srcdoc = e.target.result;
+            iframe.style.width = '100%';
+            iframe.style.height = '60vh';
+            iframe.style.border = 'none';
+
+            Modal.info({
+              title: '文件预览',
+              width: '80%',
+              content: (
+                <div style={{ height: '60vh' }}>
+                  {React.createElement('div', {
+                    dangerouslySetInnerHTML: { __html: `<iframe srcdoc="${encodeURIComponent(e.target.result)}" style="width:100%;height:60vh;border:none;"></iframe>` }
+                  })}
+                </div>
+              ),
+            });
+          } else {
+          // 普通文本内容
+            Modal.info({
+              title: '文件预览',
+              width: '80%',
+              content: (
+                <pre style={{
+                  maxHeight: '60vh',
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word'
+                }}>
+                  {e.target.result}
+                </pre>
+              ),
+            });
+          }
         };
         reader.readAsText(blob);
       } else if (fileType.startsWith('image/')) {
@@ -157,8 +216,22 @@ function PreviewPage() {
           ),
         });
       } else if (fileType === 'application/pdf') {
-        // PDF文件
-        window.open(fileUrl, '_blank');
+        // PDF文件 - 使用内嵌iframe而不是新窗口，避免被浏览器阻止
+        Modal.info({
+          title: 'PDF预览',
+          width: '90%',
+          content: (
+            <div style={{ height: '70vh' }}>
+              <iframe
+                src={fileUrl}
+                width="100%"
+                height="100%"
+                title="PDF预览"
+                style={{ border: 'none' }}
+              />
+            </div>
+          ),
+        });
       }
 
       // 清理URL
@@ -167,10 +240,18 @@ function PreviewPage() {
       }, 100);
 
     } catch (error) {
+      console.error('预览文件失败:', error);
       if (error.response?.status === 403) {
+        message.error('需要下载码访问此文件');
         setCodeModalVisible(true);
+      } else if (error.response?.status === 404) {
+        message.error('文件不存在或已被删除');
+      } else if (error.response?.status === 400) {
+        message.error(error.response?.data?.detail || '此文件类型不支持预览');
+      } else if (error.code === 'ECONNABORTED') {
+        message.error('预览请求超时，请稍后重试');
       } else {
-        message.error('文件预览失败');
+        message.error('文件预览失败: ' + (error.response?.data?.detail || error.message || '未知错误'));
       }
     } finally {
       setLoading(false);
@@ -224,10 +305,16 @@ function PreviewPage() {
       
       message.success('文件下载成功');
     } catch (error) {
+      console.error('下载文件失败:', error);
       if (error.response?.status === 403) {
+        message.error('需要下载码访问此文件');
         setCodeModalVisible(true);
+      } else if (error.response?.status === 404) {
+        message.error('文件不存在或已被删除');
+      } else if (error.code === 'ECONNABORTED') {
+        message.error('下载请求超时，请稍后重试');
       } else {
-        message.error('文件下载失败');
+        message.error('文件下载失败: ' + (error.response?.data?.detail || error.message || '未知错误'));
       }
     } finally {
       setLoading(false);
@@ -291,6 +378,8 @@ function PreviewPage() {
                     }
                   }}
                   loading={loading}
+                    disabled={!fileInfo?.can_preview}
+                    title={!fileInfo?.can_preview ? "此文件类型不支持预览" : ""}
                 >
                   预览文件
                 </Button>

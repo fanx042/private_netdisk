@@ -85,8 +85,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 创建上传文件目录
-UPLOAD_DIR = Path("uploads")
+# 创建上传文件目录（使用绝对路径）
+UPLOAD_DIR = Path(__file__).parent.absolute() / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # 依赖项
@@ -281,29 +281,47 @@ async def download_file(
     db: Session = Depends(get_db)
 ):
     """下载文件"""
-    file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
-    if not file:
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    # 检查访问权限
-    check_file_access_permission(current_user, file, download_code)
-    
-    if not os.path.exists(file.filepath):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    # 更新下载次数
-    file.downloads = (file.downloads or 0) + 1
-    db.commit()
-    
-    # 记录下载信息
-    client_ip = get_client_ip(request)
-    logging.info(f"File downloaded - File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
-    
-    return FileResponse(
-        path=file.filepath,
-        filename=file.filename,
-        media_type=file.file_type or 'application/octet-stream'
-    )
+    try:
+        file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
+        if not file:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 检查访问权限 - 对于公开文件，即使未登录也可以访问
+        if file.is_private:
+            # 私密文件需要检查权限
+            check_file_access_permission(current_user, file, download_code)
+        
+        # 检查文件是否存在
+        file_path = Path(file.filepath)
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在或已被删除")
+        
+        # 确保文件类型正确
+        content_type = file.file_type
+        if not content_type:
+            # 如果数据库中没有记录文件类型，尝试从文件扩展名推断
+            content_type = mimetypes.guess_type(file.filename)[0] or 'application/octet-stream'
+        
+        # 更新下载次数
+        file.downloads = (file.downloads or 0) + 1
+        db.commit()
+        
+        # 记录下载信息
+        client_ip = get_client_ip(request)
+        user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
+        logging.info(f"File downloaded - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=file.filename,
+            media_type=content_type
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error downloading file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="文件下载失败，请稍后重试")
 
 @app.get("/api/files/{file_id}/info")
 async def get_file_info(
@@ -318,12 +336,16 @@ async def get_file_info(
     if not file:
         raise HTTPException(status_code=404, detail="文件不存在")
     
-    # 检查访问权限
-    check_file_access_permission(current_user, file, download_code)
+    # 检查访问权限 - 对于公开文件，即使未登录也可以访问
+    if file.is_private:
+        # 私密文件需要检查权限
+        check_file_access_permission(current_user, file, download_code)
+    # 公开文件可以直接访问，无需权限检查
     
     # 记录信息请求
     client_ip = get_client_ip(request)
-    logging.info(f"File info requested - File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+    user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
+    logging.info(f"File info requested - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
     
     # 返回文件基本信息
     return {
@@ -349,75 +371,135 @@ def get_user_info(current_user: User = Depends(get_current_user)):
     }
 
 # 预览文件
-@app.get("/api/files/{file_id}/preview")
+@app.get("/api/files/{file_id}/preview", response_class=HTMLResponse)
 async def preview_file(
     request: Request,
     file_id: int,
-    download_code: Optional[str] = None,
+    download_code: str = None,
     current_user: Optional[User] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """预览文件"""
     file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
     if not file:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # 检查访问权限
-    check_file_access_permission(current_user, file, download_code)
-
-    # 检查文件是否存在
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    # 检查访问权限 - 对于公开文件，即使未登录也可以访问
+    if file.is_private:
+        # 私密文件需要检查权限
+        check_file_access_permission(current_user, file, download_code)
+    # 公开文件可以直接访问，无需权限检查
+    
     if not os.path.exists(file.filepath):
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # 检查文件是否支持预览
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    # 检查文件是否可预览
     if file.file_type not in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']:
-        raise HTTPException(status_code=400, detail="File type not supported for preview")
-
+        raise HTTPException(status_code=400, detail="此文件类型不支持预览")
+    
     # 记录预览信息
     client_ip = get_client_ip(request)
-    logging.info(f"File previewed - File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+    user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
+    logging.info(f"File previewed - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+    
+    try:
+        # 确保文件路径是绝对路径
+        file_path = Path(file.filepath)
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在或已被删除")
 
-    # 根据文件类型返回不同的预览响应
-    if file.file_type == 'text/plain':
-        try:
-            with open(file.filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-            return HTMLResponse(content=f"<pre>{content}</pre>")
-        except UnicodeDecodeError:
-            # 尝试其他编码
+        # 根据文件类型处理预览
+        if file.file_type.startswith('image/'):
+            # 图片文件
+            return FileResponse(
+                path=str(file_path),
+                media_type=file.file_type,
+                filename=file.filename
+            )
+        elif file.file_type == 'text/plain':
+            # 文本文件
             try:
-                with open(file.filepath, 'r', encoding='latin-1') as f:
+                with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                return HTMLResponse(content=f"<pre>{content}</pre>")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error reading text file: {str(e)}")
-    
-    elif file.file_type.startswith('image/'):
-        try:
-            # 使用PIL处理图片预览
-            with Image.open(file.filepath) as img:
-                # 调整图片大小用于预览
-                max_size = (800, 800)
-                img.thumbnail(max_size)
-                img_byte_arr = io.BytesIO()
-                img.save(img_byte_arr, format=img.format)
-                img_byte_arr.seek(0)
-                return StreamingResponse(img_byte_arr, media_type=file.file_type)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
-    
-    elif file.file_type == 'application/pdf':
-        return FileResponse(
-            path=file.filepath,
-            media_type='application/pdf',
-            filename=file.filename
+                    # 将文本内容包装在基本的HTML中，以便更好地显示
+                    html_content = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="utf-8">
+                        <title>文件预览</title>
+                        <style>
+                            body {{
+                                font-family: Arial, sans-serif;
+                                line-height: 1.6;
+                                padding: 20px;
+                                max-width: 800px;
+                                margin: 0 auto;
+                                white-space: pre-wrap;
+                                word-wrap: break-word;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <pre>{content}</pre>
+                    </body>
+                    </html>
+                    """
+                    return HTMLResponse(content=html_content)
+            except UnicodeDecodeError:
+                # 如果UTF-8解码失败，尝试其他编码
+                try:
+                    with open(file_path, 'r', encoding='gbk') as f:
+                        content = f.read()
+                        html_content = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="gbk">
+                            <title>文件预览</title>
+                            <style>
+                                body {{
+                                    font-family: Arial, sans-serif;
+                                    line-height: 1.6;
+                                    padding: 20px;
+                                    max-width: 800px;
+                                    margin: 0 auto;
+                                    white-space: pre-wrap;
+                                    word-wrap: break-word;
+                                }}
+                            </style>
+                        </head>
+                        <body>
+                            <pre>{content}</pre>
+                        </body>
+                        </html>
+                        """
+                        return HTMLResponse(content=html_content)
+                except:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="无法预览此文件，可能包含不支持的字符编码"
+                    )
+        elif file.file_type == 'application/pdf':
+            # PDF文件
+            return FileResponse(
+                path=str(file_path),
+                media_type='application/pdf',
+                filename=file.filename
+            )
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"不支持预览的文件类型：{file.file_type}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error previewing file {file_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail="文件预览失败，请稍后重试"
         )
-    
-    # 默认情况，直接返回文件
-    return FileResponse(
-        path=file.filepath,
-        media_type=file.file_type,
-        filename=file.filename
-    )
 
 # 删除文件
 @app.delete("/api/files/{file_id}")
