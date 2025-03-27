@@ -170,6 +170,44 @@ cd netdisk
 
 ### 方法一：使用启动脚本（推荐）
 
+项目提供了Windows和Linux/macOS两套启动脚本。
+
+#### Windows系统：
+
+使用集成脚本一键启动所有服务：
+```cmd
+# 普通启动
+scripts\start_all.bat
+
+# 更新依赖模式启动（清理并重新安装所有依赖）
+scripts\start_all.bat --update-deps
+```
+
+或者分别启动各个服务：
+
+1. 启动后端服务：
+```cmd
+scripts\start_backend.cmd
+```
+
+2. 启动前端服务：
+```cmd
+# 普通启动
+scripts\start_frontend.cmd
+
+# 更新依赖模式启动
+scripts\start_frontend.cmd --update-deps
+```
+
+Windows脚本特性：
+- 自动检查并创建conda环境
+- 自动检查Node.js版本要求
+- 支持依赖更新模式
+- 后端日志自动保存在backend/logs目录
+- 优雅的服务停止处理
+
+#### Linux/macOS系统：
+
 使用集成脚本一键启动所有服务：
 ```bash
 # 添加执行权限
@@ -312,6 +350,10 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
    - 上传失败时检查文件大小和格式
    - 下载失败时确认网络连接
    - 私密文件访问失败时检查下载码
+   - Windows环境启动问题：
+     * 如遇到conda环境问题，使用 `--update-deps` 参数重新安装依赖
+     * 查看backend/logs目录下的日志文件定位后端问题
+     * 确保已安装Python 3.8及Node.js 16或更高版本
 
 ## 开发计划
 
