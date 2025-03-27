@@ -1,6 +1,43 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from typing import Optional
+import ipaddress
+
+def get_client_ip(request: Request) -> str:
+    """获取客户端真实IP地址"""
+    # 按优先级尝试获取IP地址
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # X-Forwarded-For 格式可能是: client, proxy1, proxy2
+        # 取第一个合法的IP地址
+        for ip in forwarded_for.split(","):
+            ip = ip.strip()
+            try:
+                # 验证IP地址的合法性
+                ipaddress.ip_address(ip)
+                if not (ip.startswith("127.") or ip.startswith("192.168.") or ip.startswith("10.")):
+                    return ip
+            except ValueError:
+                continue
+    
+    # 尝试从其他header获取
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        try:
+            ipaddress.ip_address(real_ip)
+            return real_ip
+        except ValueError:
+            pass
+    
+    # 如果都没有，返回直接连接的客户端IP
+    client_host = request.client.host
+    try:
+        ipaddress.ip_address(client_host)
+        return client_host
+    except ValueError:
+        return "unknown"
+    
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -73,7 +110,8 @@ def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     access_token = create_access_token(data={"sub": user.username}, db=db, user=db_user)
     
     # 记录注册信息
-    logging.info(f"New user registered - Username: {user.username}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"New user registered - Username: {user.username}, IP: {client_ip}")
     
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -83,7 +121,8 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         # 记录登录失败信息
-        logging.warning(f"Failed login attempt - Username: {form_data.username}, IP: {request.client.host}")
+        client_ip = get_client_ip(request)
+        logging.warning(f"Failed login attempt - Username: {form_data.username}, IP: {client_ip}")
         raise HTTPException(status_code=400, detail="用户名或密码不正确")
     
     # 检查是否已在其他设备登录
@@ -100,7 +139,8 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     access_token = create_access_token(data={"sub": user.username}, db=db, user=user)
     
     # 记录登录成功信息
-    logging.info(f"Successful login - Username: {user.username}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"Successful login - Username: {user.username}, IP: {client_ip}")
     
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -109,7 +149,8 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
 def logout(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     logout_user(db, current_user)
     # 记录注销信息
-    logging.info(f"User logged out - Username: {current_user.username}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"User logged out - Username: {current_user.username}, IP: {client_ip}")
     return {"message": "Successfully logged out"}
 
 # 上传文件
@@ -134,9 +175,18 @@ def upload_file(
         content = file.file.read()
         buffer.write(content)
 
-    # 生成或使用提供的下载码
+    # 处理私密文件的下载码
     if is_private:
-        final_download_code = download_code if download_code else generate_download_code()
+        # 验证用户提供的下载码是否符合4位数字要求
+        if download_code:
+            if not (len(download_code) == 4 and download_code.isdigit()):
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Download code must be exactly 4 digits"
+                )
+            final_download_code = download_code
+        else:
+            final_download_code = generate_download_code()
     else:
         final_download_code = None
 
@@ -154,7 +204,8 @@ def upload_file(
     db.refresh(db_file)
 
     # 记录文件上传信息
-    logging.info(f"File uploaded - Username: {current_user.username}, Filename: {file.filename}, Private: {is_private}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"File uploaded - Username: {current_user.username}, Filename: {file.filename}, Private: {is_private}, IP: {client_ip}")
 
     return {"message": "File uploaded successfully", "download_code": final_download_code if is_private else None}
 
@@ -162,7 +213,8 @@ def upload_file(
 @app.get("/api/files", response_model=List[FileInfoResponse])
 def get_files(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # 记录文件列表请求
-    logging.info(f"File list requested - Username: {current_user.username}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"File list requested - Username: {current_user.username}, IP: {client_ip}")
     files = db.query(FileInfo).order_by(FileInfo.upload_time.desc()).all()
     return [
         FileInfoResponse(
@@ -191,11 +243,13 @@ def download_file(
 
     if file.is_private and file.user_id != current_user.id:
         if not download_code or download_code != file.download_code:
-            logging.warning(f"Invalid download attempt - Username: {current_user.username}, File ID: {file_id}, IP: {request.client.host}")
+            client_ip = get_client_ip(request)
+            logging.warning(f"Invalid download attempt - Username: {current_user.username}, File ID: {file_id}, IP: {client_ip}")
             raise HTTPException(status_code=403, detail="Invalid download code")
 
     # 记录文件下载信息
-    logging.info(f"File downloaded - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"File downloaded - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
 
     return FileResponse(
         path=file.filepath,
@@ -239,7 +293,8 @@ def delete_file(
     db.commit()
     
     # 记录文件删除信息
-    logging.info(f"File deleted - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"File deleted - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
     
     return {"message": "File deleted successfully"}
 
@@ -255,6 +310,7 @@ def update_user_info(
     db.commit()
     
     # 记录密码更新信息
-    logging.info(f"Password updated - Username: {current_user.username}, IP: {request.client.host}")
+    client_ip = get_client_ip(request)
+    logging.info(f"Password updated - Username: {current_user.username}, IP: {client_ip}")
     
     return {"message": "Password updated successfully"}
