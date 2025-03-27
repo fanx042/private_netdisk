@@ -4,6 +4,7 @@ import { Layout, ConfigProvider, theme } from 'antd';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import HomePage from './pages/HomePage';
+import PreviewPage from './pages/PreviewPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import AppHeader from './components/AppHeader';
 
@@ -35,6 +36,7 @@ function AppContent() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/preview/:fileId" element={<PreviewPage />} />
           <Route
             path="/"
             element={

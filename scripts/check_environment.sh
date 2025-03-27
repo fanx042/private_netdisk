@@ -40,6 +40,29 @@ if command -v conda &> /dev/null; then
     # 检查disk环境
     if conda info --envs | grep -q disk; then
         echo "已存在conda环境: disk"
+        
+        # 检查disk环境中的Python版本
+        echo "检查disk环境中的Python版本..."
+        disk_python_version=$(conda run -n disk python --version 2>&1)
+        if [[ $disk_python_version == Python* ]]; then
+            echo "disk环境中的Python版本: $disk_python_version"
+            
+            # 提取版本号并比较
+            version_number=$(echo $disk_python_version | cut -d' ' -f2)
+            major_version=$(echo $version_number | cut -d. -f1)
+            minor_version=$(echo $version_number | cut -d. -f2)
+            
+            if [ "$major_version" -lt 3 ] || ([ "$major_version" -eq 3 ] && [ "$minor_version" -lt 8 ]); then
+                echo "警告: disk环境中的Python版本低于推荐版本(3.8+)"
+                echo "建议更新disk环境的Python版本:"
+                echo "conda activate disk"
+                echo "conda install python=3.8"
+            else
+                echo "disk环境中的Python版本满足要求"
+            fi
+        else
+            echo "无法获取disk环境中的Python版本"
+        fi
     else
         echo "未找到conda环境: disk"
         echo "启动脚本将自动创建此环境"
@@ -81,4 +104,16 @@ else
     echo "uvicorn将通过后端requirements.txt安装"
 fi
 
+# 检查后端关键依赖
+echo -e "\n检查后端关键依赖..."
+if conda info --envs | grep -q disk; then
+    echo "在disk环境中检查依赖..."
+    conda run -n disk pip list | grep -E "fastapi|uvicorn|sqlalchemy|pydantic"
+else
+    echo "disk环境不存在，无法检查后端依赖"
+    echo "请先创建disk环境并安装依赖"
+fi
+
 echo -e "\n===== 环境检查完成 ====="
+echo "如果发现任何问题，请按照上述建议进行修复。"
+echo "环境准备就绪后，可以运行 ./scripts/start_all.sh 启动服务。"

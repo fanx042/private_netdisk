@@ -26,13 +26,19 @@ fi
 cd ../frontend
 echo "正在启动前端服务..."
 
-# 清理node_modules和package-lock.json
-echo "清理旧的依赖..."
-rm -rf node_modules package-lock.json
-
-# 安装依赖
-echo "安装依赖..."
-npm install
+# 检查是否需要更新依赖
+if [ "$1" == "--update-deps" ]; then
+    echo "更新依赖模式：清理旧的依赖..."
+    rm -rf node_modules package-lock.json
+    echo "安装新的依赖..."
+    npm install
+else
+    # 如果 node_modules 不存在，则安装依赖
+    if [ ! -d "node_modules" ]; then
+        echo "未检测到 node_modules，安装依赖..."
+        npm install
+    fi
+fi
 
 # 启动开发服务器
 echo "启动 Vite 开发服务器..."

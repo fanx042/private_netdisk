@@ -7,3 +7,6 @@ sqlalchemy==2.0.23
 pydantic==2.4.2
 pydantic-settings==2.0.3
 python-dotenv==1.0.0
+Pillow==9.5.0
+typing-extensions==4.8.0
+ipaddress==1.0.10

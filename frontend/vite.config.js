@@ -9,7 +9,7 @@ export default defineConfig({
     host: true,  // 允许通过IP地址访问
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true
       }
     }

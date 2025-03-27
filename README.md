@@ -110,7 +110,7 @@
 ## 环境要求
 
 ### 系统要求
-- Windows 10/11 操作系统
+- Linux/Windows/macOS 操作系统
 - 4GB及以上内存
 - 1GB以上可用磁盘空间
 
@@ -118,6 +118,26 @@
 - Python 3.8 或更高版本
 - Node.js 16 或更高版本
 - npm 8 或更高版本
+- Conda（推荐使用Miniconda）
+
+## 环境检查和准备
+
+项目提供了环境检查脚本，可以帮助您验证和准备开发环境：
+
+```bash
+# 添加脚本执行权限
+chmod +x scripts/*.sh
+
+# 运行环境检查脚本
+./scripts/check_environment.sh
+```
+
+环境检查脚本会检查以下内容：
+1. Node.js 版本及其包管理器
+2. Python 版本
+3. Conda 环境（特别是"disk"环境）
+4. 后端关键依赖包的状态
+5. 提供详细的问题修复建议
 
 ## 详细安装步骤
 
@@ -129,65 +149,46 @@ cd netdisk
 
 ### 2. 后端设置
 
-1. 进入后端目录：
-```bash
-cd backend
-```
+后端使用 Conda 管理 Python 虚拟环境，启动脚本会自动完成以下操作：
 
-2. 创建并激活虚拟环境：
-```bash
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境（Windows）
-venv\Scripts\activate
-
-# 激活虚拟环境（Linux/Mac）
-source venv/bin/activate
-```
-
-3. 安装依赖：
-```bash
-pip install -r requirements.txt
-```
-
-4. 初始化数据库：
-```bash
-# 首次运行会自动创建数据库
-python main.py
-```
+1. 检查并安装 Conda（如果未安装）
+2. 创建或激活 "disk" 虚拟环境（Python 3.8）
+3. 安装项目依赖
+4. 创建必要的目录结构
+5. 启动 FastAPI 服务
 
 ### 3. 前端设置
 
-1. 进入前端目录：
-```bash
-cd frontend
-```
+前端环境配置会在启动脚本中自动完成：
 
-2. 安装依赖：
-```bash
-npm install
-```
-
-3. 创建环境配置文件（.env）：
-```bash
-VITE_API_URL=http://localhost:8000
-```
+1. 检查并安装 nvm（Node Version Manager）
+2. 安装并使用 Node.js 16
+3. 清理并重新安装依赖
+4. 启动 Vite 开发服务器
 
 ## 启动应用
 
 ### 方法一：使用启动脚本（推荐）
 
+使用集成脚本一键启动所有服务：
+```bash
+# 添加执行权限
+chmod +x scripts/*.sh
+
+# 启动所有服务
+./scripts/start_all.sh
+```
+
+或者分别启动各个服务：
+
 1. 启动后端服务：
 ```bash
-cd scripts
-start_backend.cmd
+./scripts/start_backend.sh
 ```
 
 2. 启动前端服务：
 ```bash
-cd scripts
-start_frontend.cmd
+./scripts/start_frontend.sh
 ```
 
 ### 方法二：手动启动
@@ -195,15 +196,26 @@ start_frontend.cmd
 1. 启动后端服务：
 ```bash
 cd backend
-venv\Scripts\activate
-uvicorn main:app --reload --port 8000
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate disk
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 2. 启动前端服务：
 ```bash
 cd frontend
+nvm use 16  # 如果已安装nvm
+npm install
 npm run dev
 ```
+
+### 验证服务状态
+
+启动完成后：
+- 后端API服务运行在：http://localhost:8000
+- 前端开发服务器运行在：http://localhost:5173
+- 可以访问 http://localhost:8000/docs 查看API文档
 
 ## 配置说明
 
@@ -304,10 +316,10 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 ## 开发计划
 
 1. 近期计划：
-   - [ ] 添加文件在线预览功能
+   - [x] 添加文件在线预览功能
    - [ ] 支持文件夹上传
    - [ ] 增加文件分享功能
-   - [ ] 添加文件搜索功能
+   - [x] 添加文件搜索功能
 
 2. 长期规划：
    - [ ] 支持更多文件格式

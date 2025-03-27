@@ -19,6 +19,9 @@ import {
   KeyOutlined,
   DeleteOutlined,
   InboxOutlined,
+  EyeOutlined,
+  SearchOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,8 +35,14 @@ function HomePage() {
   const [downloadCode, setDownloadCode] = useState('');
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [currentFileId, setCurrentFileId] = useState(null);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [downloadForm] = Form.useForm();
   const queryClient = useQueryClient();
+  const [searchText, setSearchText] = useState('');
+  const [searchedColumn, setSearchedColumn] = useState('');
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [currentShareLink, setCurrentShareLink] = useState('');
+  const [currentShareFile, setCurrentShareFile] = useState(null);
 
   // 获取文件列表
   const { data: files, isLoading } = useQuery({
@@ -131,6 +140,7 @@ function HomePage() {
     // 如果是私密文件且不是自己的，显示输入下载码的对话框
     setCurrentFileId(fileId);
     setDownloadModalVisible(true);
+    setIsPreviewMode(false); // 标记为下载模式
   };
 
   // 下载文件
@@ -187,15 +197,108 @@ function HomePage() {
     }
   };
 
+  // 处理文件预览
+  const handlePreview = async (fileId, isPrivateFile, fileDownloadCode, inputCode = null) => {
+    try {
+      const token = localStorage.getItem('token');
+      let url = `/api/files/${fileId}/preview`;
+
+      // 使用传入的下载码或已有的下载码
+      const code = inputCode || fileDownloadCode;
+
+      if (isPrivateFile && !code) {
+        // 如果是私密文件且没有下载码，显示输入下载码的对话框
+        setCurrentFileId(fileId);
+        setDownloadModalVisible(true);
+        // 标记当前操作为预览模式
+        setIsPreviewMode(true);
+        return;
+      }
+
+      if (code) {
+        url += `?download_code=${code}`;
+      }
+
+      const response = await axios({
+        url,
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+
+      // 创建预览窗口
+      const fileType = response.headers['content-type'];
+      const blob = new Blob([response.data], { type: fileType });
+      const fileUrl = URL.createObjectURL(blob);
+
+      // 根据文件类型选择预览方式
+      if (fileType === 'text/plain') {
+        // 文本文件
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          Modal.info({
+            title: '文件预览',
+            width: '80%',
+            content: (
+              <pre style={{
+                maxHeight: '60vh',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word'
+              }}>
+                {e.target.result}
+              </pre>
+            ),
+          });
+        };
+        reader.readAsText(blob);
+      } else if (fileType.startsWith('image/')) {
+        // 图片文件
+        Modal.info({
+          title: '图片预览',
+          width: '80%',
+          content: (
+            <img
+              src={fileUrl}
+              alt="preview"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '60vh',
+                objectFit: 'contain'
+              }}
+            />
+          ),
+        });
+      } else if (fileType === 'application/pdf') {
+        // PDF文件
+        window.open(fileUrl, '_blank');
+      }
+
+      // 清理URL
+      setTimeout(() => {
+        URL.revokeObjectURL(fileUrl);
+      }, 100);
+
+    } catch (error) {
+      message.error(error.response?.data?.detail || '文件预览失败');
+    }
+  };
+
   // 处理下载码提交
   const handleDownloadCodeSubmit = () => {
     downloadForm.validateFields().then((values) => {
-      downloadFile(currentFileId, values.downloadCode);
+      if (isPreviewMode) {
+        // 如果是预览模式，调用预览函数
+        handlePreview(currentFileId, true, null, values.downloadCode);
+      } else {
+      // 如果是下载模式，调用下载函数
+        downloadFile(currentFileId, values.downloadCode);
+      }
       setDownloadModalVisible(false);
       downloadForm.resetFields();
+      setIsPreviewMode(false); // 重置模式
     });
   };
-
   const columns = [
     {
       title: '文件名',
@@ -217,7 +320,10 @@ function HomePage() {
       title: '类型',
       key: 'type',
       render: (_, record) => (
-        <Text>{record.is_private ? '私密文件' : '公开文件'}</Text>
+        <Space direction="vertical" size={0}>
+          <Text>{record.is_private ? '私密文件' : '公开文件'}</Text>
+          <Text type="secondary" style={{ fontSize: '12px' }}>{record.file_type}</Text>
+        </Space>
       ),
     },
     {
@@ -237,12 +343,26 @@ function HomePage() {
       key: 'action',
       render: (_, record) => (
         <Space>
+          {record.can_preview && (
+            <Button
+              icon={<EyeOutlined />}
+              onClick={() => handlePreview(record.id, record.is_private, record.download_code)}
+            >
+              预览
+            </Button>
+          )}
           <Button
             type="primary"
             icon={<DownloadOutlined />}
             onClick={() => handleDownload(record.id, record.is_private, record.download_code)}
           >
             下载
+          </Button>
+          <Button
+            icon={<ShareAltOutlined />}
+            onClick={() => handleShare(record)}
+          >
+            分享
           </Button>
           {record.uploader === user.username && (
             <Button
@@ -258,6 +378,63 @@ function HomePage() {
       ),
     },
   ];
+
+  // 处理文件分享
+  const handleShare = (file) => {
+    const baseUrl = window.location.origin;
+    const shareLink = `${baseUrl}/preview/${file.id}`;
+
+    setCurrentShareFile(file);
+    setCurrentShareLink(shareLink);
+    setShareModalVisible(true);
+  };
+
+  // 复制分享链接到剪贴板
+  const copyShareLink = () => {
+    // 创建一个临时的textarea元素
+    const textarea = document.createElement('textarea');
+    textarea.value = currentShareLink;
+    textarea.style.position = 'fixed'; // 防止页面滚动
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+
+    try {
+      // 选择文本
+      textarea.select();
+      textarea.setSelectionRange(0, 99999); // 兼容移动设备
+
+      // 尝试使用新API
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(currentShareLink)
+          .then(() => {
+            message.success('分享链接已复制到剪贴板');
+          })
+          .catch(() => {
+            // 如果新API失败，回退到document.execCommand
+            const successful = document.execCommand('copy');
+            if (successful) {
+              message.success('分享链接已复制到剪贴板');
+            } else {
+              message.error('复制失败，请手动复制');
+            }
+          });
+      } else {
+        // 在不支持新API的环境中使用旧方法
+        const successful = document.execCommand('copy');
+        if (successful) {
+          message.success('分享链接已复制到剪贴板');
+        } else {
+          message.error('复制失败，请手动复制');
+        }
+      }
+    } catch (err) {
+      console.error('Copy failed:', err);
+      message.error('复制失败，请手动复制');
+    } finally {
+      // 清理临时元素
+      document.body.removeChild(textarea);
+    }
+  };
 
   return (
     <div>
@@ -301,10 +478,31 @@ function HomePage() {
         </Dragger>
       </Card>
 
-      <Card title="文件列表">
+      <Card
+        title="文件列表"
+        extra={
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索文件名、上传者或文件类型"
+            style={{ width: 300 }}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            allowClear
+          />
+        }
+      >
         <Table
           columns={columns}
-          dataSource={files}
+          dataSource={files?.filter(file => {
+            if (!searchText) return true;
+            const lowerSearchText = searchText.toLowerCase();
+            return (
+              file.filename.toLowerCase().includes(lowerSearchText) ||
+              file.uploader.toLowerCase().includes(lowerSearchText) ||
+              file.file_type?.toLowerCase().includes(lowerSearchText) ||
+              (file.is_private ? '私密文件' : '公开文件').includes(lowerSearchText)
+            );
+          })}
           rowKey="id"
           loading={isLoading}
         />
@@ -314,9 +512,12 @@ function HomePage() {
         title="输入下载码"
         open={downloadModalVisible}
         onOk={handleDownloadCodeSubmit}
+        okText={isPreviewMode ? "预览文件" : "下载文件"}
+        cancelText="取消"
         onCancel={() => {
           setDownloadModalVisible(false);
           downloadForm.resetFields();
+          setIsPreviewMode(false); // 重置模式
         }}
       >
         <Form form={downloadForm}>
@@ -327,6 +528,53 @@ function HomePage() {
             <Input placeholder="请输入4位下载码" maxLength={4} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 分享对话框 */}
+      <Modal
+        title="分享文件"
+        open={shareModalVisible}
+        onCancel={() => setShareModalVisible(false)}
+        footer={[
+          <Button key="copy" type="primary" onClick={copyShareLink} icon={<ShareAltOutlined />}>
+            复制链接
+          </Button>,
+          <Button key="close" onClick={() => setShareModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>文件名：</Text>
+          <Text>{currentShareFile?.filename}</Text>
+        </div>
+        {currentShareFile?.is_private && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <Text strong>文件类型：</Text>
+              <Text type="warning">私密文件</Text>
+            </div>
+            <div style={{ marginBottom: 16, backgroundColor: '#f5f5f5', padding: 12, borderRadius: 4 }}>
+              <Space direction="vertical">
+                <Text strong>下载码：</Text>
+                <Text code copyable type="success">{currentShareFile.download_code}</Text>
+                <Text type="secondary">
+                  请将下载码单独发送给接收者。接收者需要在预览页面输入下载码才能访问文件。
+                </Text>
+              </Space>
+            </div>
+          </>
+        )}
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>分享链接：</Text>
+          <Paragraph copyable style={{ marginTop: 8 }}>
+            {currentShareLink}
+          </Paragraph>
+        </div>
+        <Text type="secondary">
+          提示：分享链接可用于预览和下载文件。
+          {currentShareFile?.is_private && '私密文件的接收者需要输入正确的下载码才能访问。'}
+        </Text>
       </Modal>
     </div>
   );

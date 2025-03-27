@@ -30,6 +30,8 @@ class FileInfoResponse(FileInfoBase):
     upload_time: datetime
     uploader: str
     download_code: Optional[str] = None
+    file_type: str
+    can_preview: bool
     
     class Config:
         orm_mode = True

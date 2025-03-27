@@ -24,11 +24,25 @@ if [ ! -d "uploads" ]; then
     mkdir uploads
 fi
 
+# 创建日志目录
+if [ ! -d "logs" ]; then
+    mkdir logs
+fi
+
+# 获取当前日期和时间作为日志文件名的一部分
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_file="logs/backend_${timestamp}.log"
+
 # 启动服务
 echo "启动 FastAPI 服务..."
+echo "日志将被保存到: $log_file"
 if command -v uvicorn &> /dev/null; then
-    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn main:app --reload --host 0.0.0.0 --port 8000 > "$log_file" 2>&1 &
 else
     echo "uvicorn 命令未找到，尝试使用 python -m uvicorn..."
-    python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 > "$log_file" 2>&1 &
 fi
+
+# 显示日志尾部并保持进程在前台
+echo "服务已在后台启动，显示实时日志..."
+tail -f "$log_file"
