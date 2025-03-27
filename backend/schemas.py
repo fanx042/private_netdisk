@@ -25,13 +25,22 @@ class FileInfoBase(BaseModel):
 class FileInfoCreate(FileInfoBase):
     pass
 
-class FileInfoResponse(FileInfoBase):
+class FileInfo(FileInfoBase):
+    """完整的文件信息模型"""
     id: int
     upload_time: datetime
-    uploader: str
+    uploader: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    downloads: Optional[int] = 0
+    
+    class Config:
+        orm_mode = True
+
+class FileInfoResponse(FileInfo):
+    """API响应中的文件信息模型"""
     download_code: Optional[str] = None
-    file_type: str
-    can_preview: bool
+    can_preview: bool = False
     
     class Config:
         orm_mode = True

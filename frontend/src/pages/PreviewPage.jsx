@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Card, Button, Input, Form, Modal, message, Space, Typography } from 'antd';
+import { Card, Button, Input, Form, Modal, message, Space, Typography, Tooltip } from 'antd';
 import { DownloadOutlined, EyeOutlined, CopyOutlined } from '@ant-design/icons';
 import axios from 'axios';
 
 const { Text, Title } = Typography;
+
+// 格式化文件大小
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
 
 function PreviewPage() {
   const { fileId } = useParams();
@@ -275,7 +284,14 @@ function PreviewPage() {
       const response = await axios({
         url,
         method: 'GET',
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: 30000, // 设置30秒超时
+        validateStatus: function (status) {
+          return status >= 200 && status < 300;
+        },
+        headers: {
+          'Accept-Language': 'zh-CN', // 请求中文文件名
+        }
       });
 
       // 创建下载链接
@@ -285,12 +301,31 @@ function PreviewPage() {
       
       // 从响应头中获取文件名
       const contentDisposition = response.headers['content-disposition'];
-      let filename = 'download';
+      let filename = fileInfo?.filename || 'download'; // 优先使用已知的文件名
       
       if (contentDisposition) {
-        const matches = contentDisposition.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/);
-        if (matches) {
-          filename = decodeURIComponent(matches[1] || matches[2] || matches[3]);
+        try {
+        // 尝试解析 Content-Disposition 头
+          const matches = contentDisposition.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/);
+          if (matches) {
+            const rawFilename = matches[1] || matches[2] || matches[3];
+            // 处理 UTF-8 编码的文件名
+            if (matches[1]) {
+              filename = decodeURIComponent(rawFilename);
+            } else {
+              // 处理其他编码的文件名
+              try {
+                filename = decodeURIComponent(rawFilename);
+              } catch (e) {
+                // 如果解码失败，尝试使用 unescape
+                filename = unescape(rawFilename);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('解析文件名失败:', e);
+          // 如果解析失败，使用默认文件名
+          filename = fileInfo?.filename || 'download';
         }
       }
       
@@ -336,7 +371,7 @@ function PreviewPage() {
 
   return (
     <div style={{ maxWidth: 800, margin: '40px auto', padding: '0 20px' }}>
-      <Card loading={loading && !fileError}>
+      <Card loading={loading && !fileError} style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         {fileError ? (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <Title level={4} type="danger">{fileError}</Title>
@@ -365,25 +400,38 @@ function PreviewPage() {
             )}
             
             <Space direction="vertical" size="large" style={{ width: '100%', marginTop: 24 }}>
+                {fileInfo && (
+                  <div style={{ backgroundColor: '#f8f9fa', padding: '12px', borderRadius: '4px' }}>
+                    <Space direction="vertical" size="small">
+                      <Text><strong>文件大小:</strong> {fileInfo.file_size ? formatFileSize(fileInfo.file_size) : '未知'}</Text>
+                      <Text><strong>文件类型:</strong> {fileInfo.file_type || '未知'}</Text>
+                      {fileInfo.downloads !== undefined && (
+                        <Text><strong>下载次数:</strong> {fileInfo.downloads}</Text>
+                      )}
+                    </Space>
+                  </div>
+                )}
               <Space>
+                  <Tooltip title={!fileInfo?.can_preview ? "此文件类型不支持预览" : ""}>
+                    <Button
+                      type="primary"
+                      icon={<EyeOutlined />}
+                      onClick={() => {
+                        setIsPreviewMode(true);
+                        if (fileInfo?.is_private && !savedDownloadCode) {
+                          setCodeModalVisible(true);
+                        } else {
+                          handlePreview();
+                        }
+                      }}
+                      loading={loading}
+                      disabled={!fileInfo?.can_preview}
+                    >
+                      预览文件
+                    </Button>
+                  </Tooltip>
                 <Button
-                  type="primary"
-                  icon={<EyeOutlined />}
-                  onClick={() => {
-                    setIsPreviewMode(true);
-                    if (fileInfo?.is_private && !savedDownloadCode) {
-                      setCodeModalVisible(true);
-                    } else {
-                      handlePreview();
-                    }
-                  }}
-                  loading={loading}
-                    disabled={!fileInfo?.can_preview}
-                    title={!fileInfo?.can_preview ? "此文件类型不支持预览" : ""}
-                >
-                  预览文件
-                </Button>
-                <Button
+                    type="default"
                   icon={<DownloadOutlined />}
                   onClick={() => {
                     setIsPreviewMode(false);

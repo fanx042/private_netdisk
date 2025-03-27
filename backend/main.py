@@ -54,7 +54,7 @@ from jose import JWTError, jwt
 
 from models import Base, User, FileInfo
 from database import SessionLocal, engine
-from schemas import UserCreate, Token, FileInfoResponse
+from schemas import UserCreate, Token, FileInfoResponse, FileInfo as FileInfoSchema
 from auth import (
     create_access_token, get_current_user, get_password_hash, 
     verify_password, SECRET_KEY, ALGORITHM, logout_user,
@@ -311,10 +311,26 @@ async def download_file(
         user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
         logging.info(f"File downloaded - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
         
+        # 获取请求的语言
+        accept_language = request.headers.get("accept-language", "").lower()
+        
+        # 根据语言选择文件名编码方式
+        if "zh" in accept_language:
+            # 对于中文用户，使用 UTF-8 编码
+            encoded_filename = file.filename.encode('utf-8').decode('latin-1')
+            content_disposition = f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        else:
+            # 对于其他用户，使用 latin-1 编码
+            encoded_filename = file.filename.encode('latin-1', 'ignore').decode('latin-1')
+            content_disposition = f'attachment; filename="{encoded_filename}"'
+        
         return FileResponse(
             path=str(file_path),
             filename=file.filename,
-            media_type=content_type
+            media_type=content_type,
+            headers={
+                "Content-Disposition": content_disposition
+            }
         )
         
     except HTTPException:
