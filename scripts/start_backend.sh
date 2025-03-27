@@ -26,4 +26,9 @@ fi
 
 # 启动服务
 echo "启动 FastAPI 服务..."
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+if command -v uvicorn &> /dev/null; then
+    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+else
+    echo "uvicorn 命令未找到，尝试使用 python -m uvicorn..."
+    python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+fi
