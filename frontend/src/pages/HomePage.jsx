@@ -358,12 +358,16 @@ function HomePage() {
           >
             下载
           </Button>
-          <Button
-            icon={<ShareAltOutlined />}
-            onClick={() => handleShare(record)}
-          >
-            分享
-          </Button>
+          {/* 公开文件所有人都可以分享，私密文件只有上传者可以分享 */}
+          {(!record.is_private || record.uploader === user.username) && (
+            <Button
+              icon={<ShareAltOutlined />}
+              onClick={() => handleShare(record)}
+            >
+              分享
+            </Button>
+          )}
+          {/* 只有上传者可以删除文件 */}
           {record.uploader === user.username && (
             <Button
               type="primary"
@@ -382,8 +386,12 @@ function HomePage() {
   // 处理文件分享
   const handleShare = (file) => {
     const baseUrl = window.location.origin;
-    const shareLink = `${baseUrl}/preview/${file.id}`;
-
+    let shareLink = `${baseUrl}/preview/${file.id}`;
+    
+    // 如果是公开文件，直接分享链接
+    // 如果是私密文件且是上传者，可以查看并分享下载码
+    // 如果是私密文件但不是上传者，不应该能分享（UI上已限制）
+    
     setCurrentShareFile(file);
     setCurrentShareLink(shareLink);
     setShareModalVisible(true);
@@ -548,32 +556,38 @@ function HomePage() {
           <Text strong>文件名：</Text>
           <Text>{currentShareFile?.filename}</Text>
         </div>
-        {currentShareFile?.is_private && (
-          <>
-            <div style={{ marginBottom: 16 }}>
-              <Text strong>文件类型：</Text>
-              <Text type="warning">私密文件</Text>
-            </div>
-            <div style={{ marginBottom: 16, backgroundColor: '#f5f5f5', padding: 12, borderRadius: 4 }}>
-              <Space direction="vertical">
-                <Text strong>下载码：</Text>
-                <Text code copyable type="success">{currentShareFile.download_code}</Text>
-                <Text type="secondary">
-                  请将下载码单独发送给接收者。接收者需要在预览页面输入下载码才能访问文件。
-                </Text>
-              </Space>
-            </div>
-          </>
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>文件类型：</Text>
+          <Text type={currentShareFile?.is_private ? "warning" : "success"}>
+            {currentShareFile?.is_private ? "私密文件" : "公开文件"}
+          </Text>
+        </div>
+        
+        {/* 只有私密文件且是上传者时才显示下载码 */}
+        {currentShareFile?.is_private && currentShareFile?.uploader === user.username && (
+          <div style={{ marginBottom: 16, backgroundColor: '#f5f5f5', padding: 12, borderRadius: 4 }}>
+            <Space direction="vertical">
+              <Text strong>下载码：</Text>
+              <Text code copyable type="success">{currentShareFile.download_code}</Text>
+              <Text type="secondary">
+                请将下载码单独发送给接收者。接收者需要在预览页面输入下载码才能访问文件。
+              </Text>
+            </Space>
+          </div>
         )}
+        
         <div style={{ marginBottom: 16 }}>
           <Text strong>分享链接：</Text>
           <Paragraph copyable style={{ marginTop: 8 }}>
             {currentShareLink}
           </Paragraph>
         </div>
+        
         <Text type="secondary">
           提示：分享链接可用于预览和下载文件。
-          {currentShareFile?.is_private && '私密文件的接收者需要输入正确的下载码才能访问。'}
+          {currentShareFile?.is_private 
+            ? '私密文件的接收者需要输入正确的下载码才能访问。' 
+            : '公开文件可以直接访问，无需下载码。'}
         </Text>
       </Modal>
     </div>

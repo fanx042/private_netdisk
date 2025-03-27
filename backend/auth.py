@@ -69,3 +69,75 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     if user is None or user.active_token != token:
         raise credentials_exception
     return user
+
+def check_file_access_permission(user: User, file_info, download_code: Optional[str] = None):
+    """
+    检查用户是否有权限访问文件内容（下载或预览）
+    
+    Args:
+        user: 当前用户
+        file_info: 文件信息对象
+        download_code: 下载码（可选）
+        
+    Raises:
+        HTTPException: 当用户没有权限访问文件时
+    """
+    # 如果文件不是私密的，允许访问
+    if not file_info.is_private:
+        return True
+        
+    # 如果是文件上传者，允许访问
+    if user and file_info.user_id == user.id:
+        return True
+        
+    # 如果提供了正确的下载码，允许访问
+    if download_code and download_code == file_info.download_code:
+        return True
+        
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This is a private file. Please provide the correct download code to access it."
+    )
+
+def can_share_file(user: User, file_info):
+    """
+    检查用户是否有权限分享文件
+    
+    Args:
+        user: 当前用户
+        file_info: 文件信息对象
+        
+    Returns:
+        bool: 是否可以分享文件
+    """
+    # 公开文件所有用户都可以分享
+    if not file_info.is_private:
+        return user is not None  # 只要是登录用户就可以分享公开文件
+    
+    # 私密文件只有上传者可以分享
+    return user and file_info.user_id == user.id
+
+def check_file_management_permission(user: User, file_info):
+    """
+    检查用户是否有权限管理文件（如修改、删除、分享等）
+    
+    Args:
+        user: 当前用户
+        file_info: 文件信息对象
+        
+    Raises:
+        HTTPException: 当用户没有权限管理文件时
+    """
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
+        
+    if file_info.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to manage this file"
+        )
+    
+    return True

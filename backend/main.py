@@ -55,7 +55,11 @@ from jose import JWTError, jwt
 from models import Base, User, FileInfo
 from database import SessionLocal, engine
 from schemas import UserCreate, Token, FileInfoResponse
-from auth import create_access_token, get_current_user, get_password_hash, verify_password, SECRET_KEY, ALGORITHM, logout_user
+from auth import (
+    create_access_token, get_current_user, get_password_hash, 
+    verify_password, SECRET_KEY, ALGORITHM, logout_user,
+    check_file_access_permission, check_file_management_permission
+)
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -244,20 +248,28 @@ def get_files(request: Request, current_user: User = Depends(get_current_user), 
     # 记录文件列表请求
     client_ip = get_client_ip(request)
     logging.info(f"File list requested - Username: {current_user.username}, IP: {client_ip}")
+    
+    # 获取所有文件
     files = db.query(FileInfo).order_by(FileInfo.upload_time.desc()).all()
-    return [
-        FileInfoResponse(
-            id=file.id,
-            filename=file.filename,
-            upload_time=file.upload_time,
-            uploader=file.user.username,
-            is_private=file.is_private,
-            download_code=file.download_code if file.user_id == current_user.id else None,
-            file_type=file.file_type,
-            can_preview=file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']
+    
+    # 处理文件列表
+    file_list = []
+    for file in files:
+        file_list.append(
+            FileInfoResponse(
+                id=file.id,
+                filename=file.filename,
+                upload_time=file.upload_time,
+                uploader=file.user.username,
+                is_private=file.is_private,
+                # 只有文件上传者可以看到下载码
+                download_code=file.download_code if file.user_id == current_user.id else None,
+                file_type=file.file_type,
+                can_preview=file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']
+            )
         )
-        for file in files
-    ]
+    
+    return file_list
 
 # 下载文件
 @app.get("/api/files/{file_id}")
@@ -265,6 +277,7 @@ async def download_file(
     request: Request,
     file_id: int,
     download_code: str = None,
+    current_user: Optional[User] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """下载文件"""
@@ -272,11 +285,8 @@ async def download_file(
     if not file:
         raise HTTPException(status_code=404, detail="文件不存在")
     
-    # 检查私密文件是否提供了正确的下载码
-    if file.is_private and file.download_code != download_code:
-        client_ip = get_client_ip(request)
-        logging.warning(f"Invalid download attempt - File ID: {file_id}, IP: {client_ip}")
-        raise HTTPException(status_code=403, detail="下载码错误或未提供")
+    # 检查访问权限
+    check_file_access_permission(current_user, file, download_code)
     
     if not os.path.exists(file.filepath):
         raise HTTPException(status_code=404, detail="文件不存在")
@@ -300,6 +310,7 @@ async def get_file_info(
     request: Request,
     file_id: int,
     download_code: str = None,
+    current_user: Optional[User] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取文件基本信息（不包含下载码）"""
@@ -307,17 +318,14 @@ async def get_file_info(
     if not file:
         raise HTTPException(status_code=404, detail="文件不存在")
     
-    # 如果是私密文件，验证下载码
-    if file.is_private and file.download_code != download_code:
-        client_ip = get_client_ip(request)
-        logging.warning(f"Invalid info request - File ID: {file_id}, IP: {client_ip}")
-        raise HTTPException(status_code=403, detail="下载码错误或未提供")
+    # 检查访问权限
+    check_file_access_permission(current_user, file, download_code)
     
     # 记录信息请求
     client_ip = get_client_ip(request)
     logging.info(f"File info requested - File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
     
-    # 返回文件基本信息，不包含敏感信息如下载码
+    # 返回文件基本信息
     return {
         "id": file.id,
         "filename": file.filename,
@@ -327,7 +335,9 @@ async def get_file_info(
         "uploader": file.user.username if file.user else None,
         "upload_time": file.upload_time,
         "downloads": file.downloads or 0,
-        "can_preview": file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']
+        "can_preview": file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf'],
+        # 只有文件所有者才能看到下载码
+        "download_code": file.download_code if current_user and file.user_id == current_user.id else None
     }
 
 # 获取用户信息
@@ -344,6 +354,7 @@ async def preview_file(
     request: Request,
     file_id: int,
     download_code: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
@@ -351,11 +362,7 @@ async def preview_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     # 检查访问权限
-    if file.is_private:
-        if not download_code or download_code != file.download_code:
-            client_ip = get_client_ip(request)
-            logging.warning(f"Invalid preview attempt - File ID: {file_id}, IP: {client_ip}")
-            raise HTTPException(status_code=403, detail="Invalid download code")
+    check_file_access_permission(current_user, file, download_code)
 
     # 检查文件是否存在
     if not os.path.exists(file.filepath):
@@ -424,9 +431,8 @@ def delete_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # 检查是否是文件的上传者
-    if file.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Permission denied")
+    # 检查管理权限
+    check_file_management_permission(current_user, file)
     
     # 删除物理文件
     try:
