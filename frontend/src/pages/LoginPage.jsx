@@ -13,7 +13,12 @@ function LoginPage() {
       message.success('登录成功');
       navigate('/');
     } catch (error) {
-      message.error(error.response?.data?.detail || '登录失败');
+      const errorMessage = error.response?.data?.detail;
+      if (errorMessage === 'Account is already logged in on another device') {
+        message.error('该账号已在其他设备登录，请先注销');
+      } else {
+        message.error(errorMessage || '登录失败');
+      }
     }
   };
 

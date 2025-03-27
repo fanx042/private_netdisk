@@ -8,6 +8,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     hashed_password = Column(String)
+    active_token = Column(String, nullable=True)  # 存储当前活跃的token
     files = relationship("FileInfo", back_populates="user")
 
 class FileInfo(Base):

@@ -9,11 +9,12 @@ import os
 import random
 import string
 from pathlib import Path
+from jose import JWTError, jwt
 
 from models import Base, User, FileInfo
 from database import SessionLocal, engine
 from schemas import UserCreate, Token, FileInfoResponse
-from auth import create_access_token, get_current_user, get_password_hash, verify_password
+from auth import create_access_token, get_current_user, get_password_hash, verify_password, SECRET_KEY, ALGORITHM, logout_user
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -58,7 +59,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": user.username}, db=db, user=db_user)
     return {"access_token": access_token, "token_type": "bearer"}
 
 # 用户登录
@@ -66,10 +67,30 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
+        raise HTTPException(status_code=400, detail="用户名或密码不正确")
     
-    access_token = create_access_token(data={"sub": user.username})
+    # 检查是否已在其他设备登录
+    if user.active_token:
+        try:
+            # 验证旧token是否仍然有效
+            jwt.decode(user.active_token, SECRET_KEY, algorithms=[ALGORITHM])
+            # 如果token仍然有效，说明用户已在其他设备登录
+            raise HTTPException(
+                status_code=400,
+                detail="Account is already logged in on another device"
+            )
+        except JWTError:
+            # 如果token已过期，可以继续登录
+            pass
+    
+    access_token = create_access_token(data={"sub": user.username}, db=db, user=user)
     return {"access_token": access_token, "token_type": "bearer"}
+
+# 用户注销
+@app.post("/api/logout")
+def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    logout_user(db, current_user)
+    return {"message": "Successfully logged out"}
 
 # 上传文件
 @app.post("/api/files/upload")

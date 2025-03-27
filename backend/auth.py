@@ -24,7 +24,7 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 # Token处理
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, db: Session, user: User, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
@@ -32,6 +32,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    
+    # 更新用户的active_token
+    user.active_token = encoded_jwt
+    db.commit()
+    
     return encoded_jwt
 
 # 获取当前用户
@@ -41,6 +46,10 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def logout_user(db: Session, user: User):
+    user.active_token = None
+    db.commit()
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
@@ -57,6 +66,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     
     user = db.query(User).filter(User.username == username).first()
-    if user is None:
+    if user is None or user.active_token != token:
         raise credentials_exception
     return user
