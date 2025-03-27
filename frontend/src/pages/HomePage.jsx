@@ -276,46 +276,23 @@ function HomePage() {
       const fileUrl = URL.createObjectURL(blob);
 
       // 根据文件类型选择预览方式
-      if (fileType === 'text/plain' || fileType === 'text/html') {
-        // 文本文件或HTML文件
+      // 注意：文本文件现在会在后端转换为PDF，所以这里的fileType会是application/pdf
+      if (fileType === 'text/html') {
+      // HTML文件
         const reader = new FileReader();
         reader.onload = function (e) {
-          // 检查是否是HTML内容
-          if (fileType === 'text/html' || e.target.result.trim().startsWith('<!DOCTYPE html>')) {
-            // 创建iframe展示HTML内容
-            Modal.info({
-              title: 'HTML预览',
-              width: '90%',
-              content: (
-                <div style={{ height: '70vh' }}>
-                  {React.createElement('div', {
-                    dangerouslySetInnerHTML: { __html: `<iframe srcdoc="${encodeURIComponent(e.target.result)}" style="width:100%;height:100%;border:none;"></iframe>` }
-                  })}
-                </div>
-              ),
-            });
-          } else {
-            // 普通文本内容
-            Modal.info({
-              title: '文件预览',
-              width: '80%',
-              content: (
-                <pre style={{
-                  maxHeight: '60vh',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                  backgroundColor: '#f5f5f5',
-                  padding: '12px',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  lineHeight: '1.5'
-                }}>
-                  {e.target.result}
-                </pre>
-              ),
-            });
-          }
+          // 创建iframe展示HTML内容
+          Modal.info({
+            title: 'HTML预览',
+            width: '90%',
+            content: (
+              <div style={{ height: '70vh' }}>
+                {React.createElement('div', {
+                  dangerouslySetInnerHTML: { __html: `<iframe srcdoc="${encodeURIComponent(e.target.result)}" style="width:100%;height:100%;border:none;"></iframe>` }
+                })}
+              </div>
+            ),
+          });
         };
         reader.readAsText(blob);
       } else if (fileType.startsWith('image/')) {
@@ -337,8 +314,13 @@ function HomePage() {
         });
       } else if (fileType === 'application/pdf') {
         // PDF文件 - 使用内嵌iframe
+        // 检查是否是由文本文件转换的PDF
+        const fileInfo = files?.find(f => f.id === currentFileId);
+        const isTextFile = fileInfo?.file_type === 'text/plain';
+        const title = isTextFile ? '文本文件预览 (PDF格式)' : 'PDF预览';
+
         Modal.info({
-          title: 'PDF预览',
+          title: title,
           width: '90%',
           content: (
             <div style={{ height: '70vh' }}>
@@ -346,7 +328,7 @@ function HomePage() {
                 src={fileUrl}
                 width="100%"
                 height="100%"
-                title="PDF预览"
+                title={title}
                 style={{ border: 'none' }}
               />
             </div>

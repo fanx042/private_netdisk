@@ -15,14 +15,14 @@ if %errorlevel% neq 0 (
 )
 
 REM 检查环境是否存在，不存在则创建
-call conda env list | findstr /C:"disk " >nul
+call conda env list | findstr /C:"net_disk " >nul
 if %errorlevel% neq 0 (
-    echo conda环境disk不存在，正在创建并激活...
-    call conda create -n disk python=3.8 -y
+    echo conda环境net_disk不存在，正在创建并激活...
+    call conda create -n net_disk python=3.8 -y
 ) else (
-    echo conda环境disk已存在，正在激活...
+    echo conda环境net_disk已存在，正在激活...
 )
-call conda activate disk
+call conda activate net_disk
 
 REM 安装依赖
 echo 安装依赖...

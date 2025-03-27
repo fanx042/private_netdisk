@@ -137,91 +137,105 @@ function PreviewPage() {
   }, [fileId, downloadCode, downloadForm]);
 
   // 处理文件预览
-  const handlePreview = async (inputCode = null) => {
+  const handlePreview = async () => {
+    if (!fileInfo) return;
+
     try {
       setLoading(true);
-      let url = `/api/files/${fileId}/preview`;
       
-      // 使用输入的下载码或保存的下载码
-      const code = inputCode || savedDownloadCode;
-      if (code) {
-        url += `?download_code=${code}`;
-        // 保存有效的下载码以便后续使用
-        setSavedDownloadCode(code);
+      // 构建API URL
+      let apiUrl = `/api/files/${fileId}/preview`;
+      if (savedDownloadCode) {
+        apiUrl += `?download_code=${savedDownloadCode}`;
       }
 
-      // 获取认证token（如果有）
-      const token = localStorage.getItem('token');
-      const headers = {};
-      
-      // 如果有token，添加到请求头中
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      // 注意：下载码应该作为URL参数传递，而不是请求头
-
-      const response = await axios({
-        url,
-        method: 'GET',
-        responseType: 'blob',
-        // 添加超时设置
-        timeout: 30000,
-        // 添加错误处理
-        validateStatus: function (status) {
-          return status >= 200 && status < 300; // 默认值
-        },
-        headers: headers
+      // 获取文件内容
+      const response = await axios.get(apiUrl, {
+        responseType: 'blob'
       });
 
-      // 创建预览窗口
-      const fileType = response.headers['content-type'];
+      // 获取文件类型
+      const fileType = response.headers['content-type'] || '';
+
+      // 创建Blob URL用于预览
       const blob = new Blob([response.data], { type: fileType });
       const fileUrl = URL.createObjectURL(blob);
 
-      // 根据文件类型选择预览方式
-      if (fileType === 'text/plain' || fileType === 'text/html') {
-        // 文本文件
-        const reader = new FileReader();
-        reader.onload = function (e) {
-          // 检查是否是HTML内容
-          if (fileType === 'text/html' || e.target.result.trim().startsWith('<!DOCTYPE html>')) {
-            // 创建iframe展示HTML内容
-            const iframe = document.createElement('iframe');
-            iframe.srcdoc = e.target.result;
-            iframe.style.width = '100%';
-            iframe.style.height = '60vh';
-            iframe.style.border = 'none';
+      // 根据文件类型选择不同的预览方式
+      // 注意：文本文件现在会在后端转换为PDF，所以这里的fileType会是application/pdf
+      if (fileType === 'text/html') {
+        // HTML文件 - 尝试多种编码
+        const tryReadWithEncoding = (encoding) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+              resolve(e.target.result);
+            };
+            reader.onerror = function (e) {
+              reject(e);
+            };
+            reader.readAsText(blob, encoding);
+          });
+        };
 
+        try {
+          // 首先尝试 UTF-8
+          let content = await tryReadWithEncoding('UTF-8');
+
+          // 如果内容看起来像乱码，尝试 GBK
+          if (/[\ufffd\ufffe\uffff]/.test(content)) {
+            try {
+              content = await tryReadWithEncoding('GBK');
+            } catch (e) {
+              console.warn('GBK encoding failed, falling back to UTF-8');
+            }
+          }
+
+          // 检查是否是HTML内容
+          if (fileType === 'text/html' || content.trim().startsWith('<!DOCTYPE html>')) {
+          // HTML内容 - 使用iframe展示
             Modal.info({
               title: '文件预览',
               width: '80%',
               content: (
                 <div style={{ height: '60vh' }}>
                   {React.createElement('div', {
-                    dangerouslySetInnerHTML: { __html: `<iframe srcdoc="${encodeURIComponent(e.target.result)}" style="width:100%;height:60vh;border:none;"></iframe>` }
+                    dangerouslySetInnerHTML: {
+                      __html: `<iframe srcdoc="${encodeURIComponent(content)}" style="width:100%;height:60vh;border:none;"></iframe>`
+                    }
                   })}
                 </div>
               ),
             });
           } else {
-          // 普通文本内容
+            // 普通文本内容
             Modal.info({
               title: '文件预览',
               width: '80%',
               content: (
-                <pre style={{
-                  maxHeight: '60vh',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word'
-                }}>
-                  {e.target.result}
-                </pre>
+                <div>
+                  <pre style={{
+                    maxHeight: '60vh',
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word',
+                    backgroundColor: '#f5f5f5',
+                    padding: '15px',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    lineHeight: '1.6',
+                    fontFamily: 'Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace'
+                  }}>
+                    {content}
+                  </pre>
+                </div>
               ),
             });
           }
-        };
-        reader.readAsText(blob);
+        } catch (error) {
+          console.error('Error reading text file:', error);
+          message.error('文件预览失败：无法正确读取文件内容');
+        }
       } else if (fileType.startsWith('image/')) {
         // 图片文件
         Modal.info({
@@ -241,8 +255,11 @@ function PreviewPage() {
         });
       } else if (fileType === 'application/pdf') {
         // PDF文件 - 使用内嵌iframe而不是新窗口，避免被浏览器阻止
+        const isTextFile = fileInfo.file_type === 'text/plain';
+        const title = isTextFile ? '文本文件预览 (PDF格式)' : 'PDF预览';
+
         Modal.info({
-          title: 'PDF预览',
+          title: title,
           width: '90%',
           content: (
             <div style={{ height: '70vh' }}>
@@ -250,7 +267,7 @@ function PreviewPage() {
                 src={fileUrl}
                 width="100%"
                 height="100%"
-                title="PDF预览"
+                title={title}
                 style={{ border: 'none' }}
               />
             </div>

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from typing import Optional
@@ -6,6 +6,91 @@ import ipaddress
 import mimetypes
 import io
 from PIL import Image
+import tempfile
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
+from pathlib import Path
+
+# 注册中文字体
+FONT_PATH = Path(__file__).parent / "fonts"
+FONT_PATH.mkdir(exist_ok=True)
+
+# 下载并注册中文字体（如果不存在）
+def ensure_chinese_font():
+    font_file = FONT_PATH / "simhei.ttf"
+    if not font_file.exists():
+        try:
+            # 如果字体文件不存在，尝试从Windows系统字体目录复制
+            windows_font = Path("C:/Windows/Fonts/simhei.ttf")
+            if windows_font.exists():
+                import shutil
+                shutil.copy(str(windows_font), str(font_file))
+            else:
+                # 如果Windows字体不存在，使用内置的DejaVuSans
+                from reportlab.pdfbase.ttfonts import TTFont
+                pdfmetrics.registerFont(TTFont('Chinese', 'DejaVuSans.ttf'))
+                return 'DejaVuSans'
+        except Exception as e:
+            print(f"Font setup error: {e}")
+            # 如果出错，使用内置的DejaVuSans
+            return 'DejaVuSans'
+    
+    try:
+        # 注册字体
+        pdfmetrics.registerFont(TTFont('Chinese', str(font_file)))
+        return 'Chinese'
+    except:
+        # 如果注册失败，使用内置的DejaVuSans
+        pdfmetrics.registerFont(TTFont('Chinese', 'DejaVuSans.ttf'))
+        return 'DejaVuSans'
+
+# 转换文本为PDF
+def text_to_pdf(text, font_name='Chinese'):
+    # 创建一个临时文件来保存PDF
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+        # 创建PDF文档
+        c = canvas.Canvas(tmp_file.name, pagesize=A4)
+        width, height = A4
+        
+        # 设置字体和大小
+        c.setFont(font_name, 12)
+        
+        # 分割文本为行
+        lines = text.split('\n')
+        y = height - 50  # 起始位置（上边距）
+        line_height = 15  # 行高
+        margin = 50  # 左右边距
+        
+        # 写入每一行文本
+        for line in lines:
+            if y < 50:  # 如果到达页面底部
+                c.showPage()  # 创建新页面
+                y = height - 50  # 重置y坐标
+                c.setFont(font_name, 12)  # 重新设置字体
+            
+            # 处理过长的行
+            while len(line) * 7 > (width - 2 * margin):  # 估算行宽
+                # 按照页面宽度截断行
+                break_point = int((width - 2 * margin) / 7)
+                c.drawString(margin, y, line[:break_point])
+                line = line[break_point:]
+                y -= line_height
+                
+                if y < 50:  # 检查是否需要新页面
+                    c.showPage()
+                    y = height - 50
+                    c.setFont(font_name, 12)
+            
+            # 写入剩余的行或原始行
+            if line:
+                c.drawString(margin, y, line)
+                y -= line_height
+        
+        c.save()
+        return tmp_file.name
 
 def get_client_ip(request: Request) -> str:
     """获取客户端真实IP地址"""
@@ -494,69 +579,47 @@ async def preview_file(
                 filename=file.filename
             )
         elif file.file_type == 'text/plain':
-            # 文本文件
+            # 文本文件 - 转换为PDF后预览
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
+                # 首先尝试检测文件编码
+                import chardet
+                
+                # 读取文件的前4096字节来检测编码
+                with open(file_path, 'rb') as f:
+                    raw = f.read(4096)
+                    result = chardet.detect(raw)
+                    encoding = result['encoding']
+                
+                # 如果检测失败，默认尝试 UTF-8
+                if not encoding:
+                    encoding = 'utf-8'
+                
+                # 使用检测到的编码读取文件
+                with open(file_path, 'r', encoding=encoding) as f:
                     content = f.read()
-                    # 将文本内容包装在基本的HTML中，以便更好地显示
-                    html_content = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="utf-8">
-                        <title>文件预览</title>
-                        <style>
-                            body {{
-                                font-family: Arial, sans-serif;
-                                line-height: 1.6;
-                                padding: 20px;
-                                max-width: 800px;
-                                margin: 0 auto;
-                                white-space: pre-wrap;
-                                word-wrap: break-word;
-                            }}
-                        </style>
-                    </head>
-                    <body>
-                        <pre>{content}</pre>
-                    </body>
-                    </html>
-                    """
-                    return HTMLResponse(content=html_content)
-            except UnicodeDecodeError:
-                # 如果UTF-8解码失败，尝试其他编码
-                try:
-                    with open(file_path, 'r', encoding='gbk') as f:
-                        content = f.read()
-                        html_content = f"""
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                            <meta charset="gbk">
-                            <title>文件预览</title>
-                            <style>
-                                body {{
-                                    font-family: Arial, sans-serif;
-                                    line-height: 1.6;
-                                    padding: 20px;
-                                    max-width: 800px;
-                                    margin: 0 auto;
-                                    white-space: pre-wrap;
-                                    word-wrap: break-word;
-                                }}
-                            </style>
-                        </head>
-                        <body>
-                            <pre>{content}</pre>
-                        </body>
-                        </html>
-                        """
-                        return HTMLResponse(content=html_content)
-                except:
-                    raise HTTPException(
-                        status_code=400, 
-                        detail="无法预览此文件，可能包含不支持的字符编码"
-                    )
+                
+                # 确保中文字体可用
+                font_name = ensure_chinese_font()
+                
+                # 转换为PDF
+                pdf_path = text_to_pdf(content, font_name)
+                
+                # 返回生成的PDF文件
+                return FileResponse(
+                    pdf_path,
+                    media_type='application/pdf',
+                    filename=f"{file.filename}.pdf",
+                    headers={
+                        'Content-Disposition': f'inline; filename="{file.filename}.pdf"'
+                    },
+                    background=BackgroundTask(lambda: os.unlink(pdf_path))  # 清理临时PDF文件
+                )
+            except Exception as e:
+                logging.error(f"Error converting text to PDF: {str(e)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"无法转换文件为PDF：{str(e)}"
+                )
         elif file.file_type == 'application/pdf':
             # PDF文件
             return FileResponse(
