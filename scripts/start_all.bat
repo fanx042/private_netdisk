@@ -1,36 +1,37 @@
 @echo off
+chcp 65001 > nul
 setlocal enabledelayedexpansion
 
-REM 进入脚本所在目录
+REM Change to script directory
 cd /d "%~dp0"
 
-REM 检查是否需要更新依赖
+REM Check if dependency update is needed
 set update_deps=
 if "%1"=="--update-deps" (
     set update_deps=--update-deps
-    echo 将以更新依赖模式启动服务...
+    echo Starting services with dependency update mode...
 )
 
-REM 启动后端服务
-echo 正在启动后端服务...
-start cmd /c "call start_backend.cmd"
+REM Start backend service
+echo Starting backend service...
+start cmd /c "chcp 65001 > nul && call start_backend.cmd"
 
-REM 等待几秒钟确保后端启动
-echo 等待后端服务启动...
+REM Wait for backend to start
+echo Waiting for backend service to initialize...
 timeout /t 3 /nobreak > nul
 
-REM 启动前端服务
-echo 正在启动前端服务...
-start cmd /c "call start_frontend.cmd %update_deps%"
+REM Start frontend service
+echo Starting frontend service...
+start cmd /c "chcp 65001 > nul && call start_frontend.cmd %update_deps%"
 
-REM 显示服务信息
+REM Display service information
 echo ==========================================
-echo 所有服务已启动
-echo 后端服务运行在: http://localhost:8000
-echo 前端服务运行在: http://localhost:5173 (默认Vite端口)
-echo 后端日志保存在 backend/logs 目录中
-echo 请在各自的命令窗口中按任意键停止相应服务
+echo All services are running
+echo Backend service: http://localhost:8000
+echo Frontend service: http://localhost:5173 (Default Vite port)
+echo Backend logs are saved in backend/logs directory
+echo Press any key in respective windows to stop services
 echo ==========================================
 
-echo 按任意键退出此控制台窗口...
+echo Press any key to exit this control window...
 pause > nul

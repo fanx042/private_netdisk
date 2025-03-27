@@ -1,50 +1,54 @@
 @echo off
+chcp 65001 > nul
 setlocal enabledelayedexpansion
 
-REM 检查Node.js版本
-node --version > nul 2>&1
+REM Check Node.js installation
+call node --version > nul 2>&1
 if %errorlevel% neq 0 (
-    echo Node.js未安装，请先安装Node.js
+    echo Node.js is not installed. Please install Node.js first.
     pause
     exit /b 1
 )
 
-REM 获取当前Node.js版本
-for /f "tokens=1 delims=v" %%a in ('node --version') do set current_version=%%a
-set required_version=16.0.0
+REM Get current Node.js version
+for /f "tokens=* delims=" %%a in ('node --version') do set node_version=%%a
+echo Detected Node.js version: !node_version!
 
-REM 比较版本号（简化版比较，仅检查主版本号）
-for /f "tokens=1 delims=." %%a in ("%current_version%") do set current_major=%%a
-if %current_major% LSS 16 (
-    echo Node.js版本过低，当前版本为%current_version%，需要16.0.0或更高版本
-    echo 请升级Node.js或使用nvm安装更高版本
+REM Extract major version number (remove 'v' prefix and keep only first number)
+set node_version=!node_version:~1!
+for /f "tokens=1 delims=." %%a in ("!node_version!") do set major_version=%%a
+
+REM Check if version meets requirements
+if !major_version! LSS 16 (
+    echo Node.js version is too low. Current version: !node_version!, required: 16.0.0 or higher.
+    echo Please upgrade Node.js or use nvm to install a newer version.
     pause
     exit /b 1
 )
 
-REM 进入前端目录
+REM Change to frontend directory
 cd ..\frontend
-echo 正在启动前端服务...
+echo Starting frontend service...
 
-REM 检查是否需要更新依赖
+REM Check if dependency update is needed
 if "%1"=="--update-deps" (
-    echo 更新依赖模式：清理旧的依赖...
+    echo Update dependencies mode: Cleaning old dependencies...
     if exist node_modules (
         rmdir /s /q node_modules
     )
     if exist package-lock.json (
         del /f /q package-lock.json
     )
-    echo 安装新的依赖...
+    echo Installing new dependencies...
     call npm install
 ) else (
-    REM 如果node_modules不存在，则安装依赖
+    REM If node_modules doesn't exist, install dependencies
     if not exist node_modules (
-        echo 未检测到node_modules，安装依赖...
+        echo node_modules not detected, installing dependencies...
         call npm install
     )
 )
 
-REM 启动开发服务器
-echo 启动Vite开发服务器...
+REM Start development server
+echo Starting Vite development server...
 call npm run dev
