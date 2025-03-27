@@ -423,59 +423,93 @@ function HomePage() {
     {
       title: '操作',
       key: 'action',
-      render: (_, record) => (
-        <Space>
-          {record.can_preview && (
-            <Button
-              icon={<EyeOutlined />}
-              onClick={() => handlePreview(record.id, record.is_private, record.download_code)}
-            >
-              预览
-            </Button>
-          )}
+      width: 360,
+      render: (_, record) => {
+        // 定义四个操作位的按钮
+        const previewButton = record.can_preview ? (
           <Button
+            size="middle"
+            icon={<EyeOutlined />}
+            onClick={() => handlePreview(record.id, record.is_private, record.download_code)}
+          >
+            预览
+          </Button>
+        ) : (
+          <Button size="middle" icon={<EyeOutlined />} disabled>
+            预览
+          </Button>
+        );
+
+        const downloadButton = (
+          <Button
+            size="middle"
             type="primary"
             icon={<DownloadOutlined />}
             onClick={() => handleDownload(record.id, record.is_private, record.download_code)}
           >
             下载
           </Button>
-          {/* 公开文件所有人都可以分享，私密文件只有上传者可以分享 */}
-          {(!record.is_private || record.uploader === user.username) && (
-            <Button
-              icon={<ShareAltOutlined />}
-              onClick={() => handleShare(record)}
-            >
-              分享
-            </Button>
-          )}
-          {/* 只有上传者可以删除文件 */}
-          {record.uploader === user.username && (
-            <Button
-              type="primary"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(record.id)}
-            >
-              删除
-            </Button>
-          )}
-        </Space>
-      ),
-    },
+        );
+
+        const shareButton = (!record.is_private || record.uploader === user.username) ? (
+          <Button
+            size="middle"
+            icon={<ShareAltOutlined />}
+            onClick={() => handleShare(record)}
+          >
+            分享
+          </Button>
+        ) : (
+          <Button size="middle" icon={<ShareAltOutlined />} disabled>
+            分享
+          </Button>
+        );
+
+        const deleteButton = record.uploader === user.username ? (
+          <Button
+            size="middle"
+            type="primary"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record.id)}
+          >
+            删除
+          </Button>
+        ) : (
+          <Button size="middle" type="primary" danger icon={<DeleteOutlined />} disabled>
+            删除
+          </Button>
+        );
+
+        // 使用表格布局确保按钮对齐
+        return (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, auto)',
+            gap: '8px',
+            alignItems: 'center'
+          }}>
+            {previewButton}
+            {downloadButton}
+            {shareButton}
+            {deleteButton}
+          </div>
+        );
+      }
+    }
   ];
 
-  // 处理文件分享
+  // 处理分享
   const handleShare = (file) => {
-    const baseUrl = window.location.origin;
-    let shareLink = `${baseUrl}/preview/${file.id}`;
-    
-    // 如果是公开文件，直接分享链接
-    // 如果是私密文件且是上传者，可以查看并分享下载码
-    // 如果是私密文件但不是上传者，不应该能分享（UI上已限制）
-    
+    // 设置当前分享文件
     setCurrentShareFile(file);
-    setCurrentShareLink(shareLink);
+    
+    // 生成分享链接
+    const baseUrl = window.location.origin;
+    const shareUrl = `${baseUrl}/preview/${file.id}`;
+    setCurrentShareLink(shareUrl);
+    
+    // 显示分享对话框
     setShareModalVisible(true);
   };
 
