@@ -12,6 +12,9 @@ import {
   Form,
   Space,
   Typography,
+  Tag,
+  Tooltip,
+  Badge,
 } from 'antd';
 import {
   UploadOutlined,
@@ -22,6 +25,7 @@ import {
   EyeOutlined,
   SearchOutlined,
   ShareAltOutlined,
+  CloudDownloadOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -169,10 +173,29 @@ function HomePage() {
       
       // 尝试从Content-Disposition头获取文件名
       if (contentDisposition) {
-        // 处理 UTF-8 编码的文件名
-        const matches = contentDisposition.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/);
-        if (matches) {
-          filename = decodeURIComponent(matches[1] || matches[2] || matches[3]);
+        // 首先尝试获取 filename* 参数（RFC 5987）
+        const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (filenameStarMatch) {
+          // 处理 UTF-8 编码的文件名
+          try {
+            filename = decodeURIComponent(filenameStarMatch[1]);
+          } catch (e) {
+            console.error('Error decoding filename*:', e);
+          }
+        }
+        
+        // 如果 filename* 解析失败，尝试普通 filename
+        if (!filename) {
+          const filenameMatch = contentDisposition.match(/filename=\"([^\"]+)\"|filename=([^;]+)/);
+          if (filenameMatch) {
+            try {
+              filename = decodeURIComponent(filenameMatch[1] || filenameMatch[2]);
+            } catch (e) {
+              console.error('Error decoding filename:', e);
+              // 如果解码失败，直接使用原始值
+              filename = filenameMatch[1] || filenameMatch[2];
+            }
+          }
         }
       }
       
@@ -304,6 +327,18 @@ function HomePage() {
       title: '文件名',
       dataIndex: 'filename',
       key: 'filename',
+      render: (text, record) => (
+        <Space>
+          <Text>{text}</Text>
+          {record.downloads > 0 && (
+            <Tooltip title={`已下载 ${record.downloads} 次`}>
+              <Badge count={record.downloads} overflowCount={999} size="small">
+                <CloudDownloadOutlined style={{ fontSize: '16px', color: '#1890ff' }} />
+              </Badge>
+            </Tooltip>
+          )}
+        </Space>
+      ),
     },
     {
       title: '上传时间',
@@ -324,6 +359,17 @@ function HomePage() {
           <Text>{record.is_private ? '私密文件' : '公开文件'}</Text>
           <Text type="secondary" style={{ fontSize: '12px' }}>{record.file_type}</Text>
         </Space>
+      ),
+    },
+    {
+      title: '下载量',
+      dataIndex: 'downloads',
+      key: 'downloads',
+      sorter: (a, b) => a.downloads - b.downloads,
+      render: (downloads) => (
+        <Tag color={downloads > 0 ? (downloads > 10 ? 'green' : 'blue') : 'default'}>
+          {downloads || 0} 次下载
+        </Tag>
       ),
     },
     {

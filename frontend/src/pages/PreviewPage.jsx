@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Card, Button, Input, Form, Modal, message, Space, Typography, Tooltip } from 'antd';
-import { DownloadOutlined, EyeOutlined, CopyOutlined } from '@ant-design/icons';
+import { Card, Button, Input, Form, Modal, message, Space, Typography, Tooltip, Badge, Statistic } from 'antd';
+import { DownloadOutlined, EyeOutlined, CopyOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 
 const { Text, Title } = Typography;
@@ -146,6 +146,15 @@ function PreviewPage() {
         setSavedDownloadCode(code);
       }
 
+      // 获取认证token（如果有）
+      const token = localStorage.getItem('token');
+      const headers = {};
+      
+      // 如果有token，添加到请求头中
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await axios({
         url,
         method: 'GET',
@@ -155,7 +164,8 @@ function PreviewPage() {
         // 添加错误处理
         validateStatus: function (status) {
           return status >= 200 && status < 300; // 默认值
-        }
+        },
+        headers: headers
       });
 
       // 创建预览窗口
@@ -281,6 +291,17 @@ function PreviewPage() {
         setSavedDownloadCode(code);
       }
 
+      // 获取认证token（如果有）
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Accept-Language': 'zh-CN', // 请求中文文件名
+      };
+
+      // 如果有token，添加到请求头中
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await axios({
         url,
         method: 'GET',
@@ -289,9 +310,7 @@ function PreviewPage() {
         validateStatus: function (status) {
           return status >= 200 && status < 300;
         },
-        headers: {
-          'Accept-Language': 'zh-CN', // 请求中文文件名
-        }
+        headers: headers
       });
 
       // 创建下载链接
@@ -402,13 +421,24 @@ function PreviewPage() {
             <Space direction="vertical" size="large" style={{ width: '100%', marginTop: 24 }}>
                 {fileInfo && (
                   <div style={{ backgroundColor: '#f8f9fa', padding: '12px', borderRadius: '4px' }}>
-                    <Space direction="vertical" size="small">
-                      <Text><strong>文件大小:</strong> {fileInfo.file_size ? formatFileSize(fileInfo.file_size) : '未知'}</Text>
-                      <Text><strong>文件类型:</strong> {fileInfo.file_type || '未知'}</Text>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <Space direction="vertical" size="small">
+                        <Text><strong>文件大小:</strong> {fileInfo.file_size ? formatFileSize(fileInfo.file_size) : '未知'}</Text>
+                        <Text><strong>文件类型:</strong> {fileInfo.file_type || '未知'}</Text>
+                      </Space>
                       {fileInfo.downloads !== undefined && (
-                        <Text><strong>下载次数:</strong> {fileInfo.downloads}</Text>
+                        <Badge count={fileInfo.downloads} overflowCount={9999} style={{ backgroundColor: '#52c41a' }}>
+                          <Card size="small" style={{ width: 100, textAlign: 'center' }}>
+                            <Statistic
+                              title="下载"
+                              value={fileInfo.downloads}
+                              prefix={<CloudDownloadOutlined />}
+                              valueStyle={{ fontSize: '16px', color: '#52c41a' }}
+                            />
+                          </Card>
+                        </Badge>
                       )}
-                    </Space>
+                    </div>
                   </div>
                 )}
               <Space>

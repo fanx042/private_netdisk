@@ -314,14 +314,22 @@ async def download_file(
         # 获取请求的语言
         accept_language = request.headers.get("accept-language", "").lower()
         
-        # 根据语言选择文件名编码方式
-        if "zh" in accept_language:
-            # 对于中文用户，使用 UTF-8 编码
+        # 使用 RFC 5987 规范处理文件名编码，解决中文文件名问题
+        # 对于所有用户，优先使用 UTF-8 编码并添加 filename* 参数
+        try:
+            # URL编码文件名（保留空格为%20）
+            import urllib.parse
+            encoded_filename_utf8 = urllib.parse.quote(file.filename)
+            
+            # 提供两种格式的文件名，确保最大兼容性
+            # 1. filename: 基本兼容性 (ASCII 文件名)
+            # 2. filename*: 扩展支持 (RFC 5987, 支持 UTF-8)
+            ascii_filename = file.filename.encode('ascii', 'ignore').decode('ascii')
+            content_disposition = f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename_utf8}'
+        except Exception as e:
+            logging.error(f"Error encoding filename: {str(e)}")
+            # 回退方案：简单编码
             encoded_filename = file.filename.encode('utf-8').decode('latin-1')
-            content_disposition = f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
-        else:
-            # 对于其他用户，使用 latin-1 编码
-            encoded_filename = file.filename.encode('latin-1', 'ignore').decode('latin-1')
             content_disposition = f'attachment; filename="{encoded_filename}"'
         
         return FileResponse(
