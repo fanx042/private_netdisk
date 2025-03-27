@@ -255,24 +255,46 @@ function HomePage() {
       const fileUrl = URL.createObjectURL(blob);
 
       // 根据文件类型选择预览方式
-      if (fileType === 'text/plain') {
-        // 文本文件
+      if (fileType === 'text/plain' || fileType === 'text/html') {
+        // 文本文件或HTML文件
         const reader = new FileReader();
         reader.onload = function (e) {
-          Modal.info({
-            title: '文件预览',
-            width: '80%',
-            content: (
-              <pre style={{
-                maxHeight: '60vh',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word'
-              }}>
-                {e.target.result}
-              </pre>
-            ),
-          });
+          // 检查是否是HTML内容
+          if (fileType === 'text/html' || e.target.result.trim().startsWith('<!DOCTYPE html>')) {
+            // 创建iframe展示HTML内容
+            Modal.info({
+              title: 'HTML预览',
+              width: '90%',
+              content: (
+                <div style={{ height: '70vh' }}>
+                  {React.createElement('div', {
+                    dangerouslySetInnerHTML: { __html: `<iframe srcdoc="${encodeURIComponent(e.target.result)}" style="width:100%;height:100%;border:none;"></iframe>` }
+                  })}
+                </div>
+              ),
+            });
+          } else {
+            // 普通文本内容
+            Modal.info({
+              title: '文件预览',
+              width: '80%',
+              content: (
+                <pre style={{
+                  maxHeight: '60vh',
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word',
+                  backgroundColor: '#f5f5f5',
+                  padding: '12px',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  lineHeight: '1.5'
+                }}>
+                  {e.target.result}
+                </pre>
+              ),
+            });
+          }
         };
         reader.readAsText(blob);
       } else if (fileType.startsWith('image/')) {
@@ -293,8 +315,22 @@ function HomePage() {
           ),
         });
       } else if (fileType === 'application/pdf') {
-        // PDF文件
-        window.open(fileUrl, '_blank');
+        // PDF文件 - 使用内嵌iframe
+        Modal.info({
+          title: 'PDF预览',
+          width: '90%',
+          content: (
+            <div style={{ height: '70vh' }}>
+              <iframe
+                src={fileUrl}
+                width="100%"
+                height="100%"
+                title="PDF预览"
+                style={{ border: 'none' }}
+              />
+            </div>
+          ),
+        });
       }
 
       // 清理URL
