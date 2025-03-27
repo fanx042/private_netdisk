@@ -92,30 +92,34 @@ function PreviewPage() {
         setLoading(true);
         let url = `/api/files/${fileId}/info`;
 
-        // 如果URL中有下载码，将其添加到请求中
-        if (downloadCode) {
-          url += `?download_code=${downloadCode}`;
-        }
+        // 如果URL中有下载码，将其添加到请求参数中
+        const params = downloadCode ? { download_code: downloadCode } : {};
 
         // 获取token（如果用户已登录）
         const token = localStorage.getItem('token');
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        // 如果用户已登录，添加Authorization header
+        const headers = {};
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
 
-        const response = await axios.get(url, { headers });
+        const response = await axios.get(url, { headers, params });
         setFileInfo(response.data);
         
-        // 如果URL中有下载码，自动填入表单
-        if (downloadCode) {
-          downloadForm.setFieldsValue({ downloadCode });
-          // 保存下载码以便后续使用
-          setSavedDownloadCode(downloadCode);
+        // 如果URL中有下载码或响应中包含下载码，自动填入表单并保存
+        if (downloadCode || response.data.download_code) {
+          const codeToSave = downloadCode || response.data.download_code;
+          downloadForm.setFieldsValue({ downloadCode: codeToSave });
+          setSavedDownloadCode(codeToSave);
         }
       } catch (error) {
         console.error('获取文件信息失败', error);
         if (error.response?.status === 404) {
           setFileError('文件不存在或已被删除');
         } else if (error.response?.status === 403) {
-          if (error.response?.data?.detail?.includes('private file')) {
+          if (error.response?.data?.detail?.includes('private file') ||
+            error.response?.data?.detail?.includes('Please provide download code')) {
+          // 如果是私密文件且没有提供下载码，立即显示下载码输入框
             setFileError('这是一个私密文件，请输入下载码访问');
             setCodeModalVisible(true);
           } else {
@@ -154,6 +158,7 @@ function PreviewPage() {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
+      // 注意：下载码应该作为URL参数传递，而不是请求头
 
       const response = await axios({
         url,
@@ -301,6 +306,7 @@ function PreviewPage() {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
+      // 注意：下载码应该作为URL参数传递，而不是请求头
 
       const response = await axios({
         url,
@@ -523,9 +529,17 @@ function PreviewPage() {
         title="输入下载码"
         open={codeModalVisible}
         onOk={handleCodeSubmit}
-        onCancel={() => setCodeModalVisible(false)}
+        onCancel={() => {
+          // 如果用户在初始加载时取消输入下载码，显示提示信息
+          if (!fileInfo) {
+            setFileError('需要下载码才能访问此私密文件');
+          }
+          setCodeModalVisible(false);
+        }}
         okText={isPreviewMode ? "预览" : "下载"}
         cancelText="取消"
+        maskClosable={false} // 防止用户点击蒙层关闭
+        closable={!!fileInfo} // 只有在已经获取到文件信息后才允许关闭
       >
         <div style={{ marginBottom: 16 }}>
           <Text>这是一个私密文件，请输入下载码继续访问</Text>

@@ -271,6 +271,59 @@ def get_files(request: Request, current_user: User = Depends(get_current_user), 
     
     return file_list
 
+# 获取文件信息
+@app.get("/api/files/{file_id}/info")
+async def get_file_info(
+    request: Request,
+    file_id: int,
+    download_code: str = None,
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取文件信息"""
+    try:
+        file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
+        if not file:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 如果是私密文件，需要验证访问权限
+        if file.is_private:
+            # 如果用户未登录且未提供下载码，或者提供的下载码不正确
+            if not current_user and (not download_code or download_code != file.download_code):
+                raise HTTPException(
+                    status_code=403,
+                    detail="This is a private file. Please provide download code."
+                )
+            # 如果用户已登录但不是文件所有者，且未提供正确的下载码
+            elif current_user and current_user.id != file.user_id and (not download_code or download_code != file.download_code):
+                raise HTTPException(
+                    status_code=403,
+                    detail="This is a private file. Please provide download code."
+                )
+
+        # 记录文件信息访问
+        client_ip = get_client_ip(request)
+        user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
+        logging.info(f"File info accessed - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+        
+        # 返回文件基本信息
+        return {
+            "id": file.id,
+            "filename": file.filename,
+            "upload_time": file.upload_time,
+            "uploader": file.user.username,
+            "is_private": file.is_private,
+            "file_type": file.file_type,
+            "can_preview": file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf'],
+            # 只有在以下情况下返回下载码：1.文件所有者 2.提供了正确的下载码
+            "download_code": file.download_code if (current_user and current_user.id == file.user_id) or (download_code and download_code == file.download_code) else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting file info {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取文件信息失败")
+
 # 下载文件
 @app.get("/api/files/{file_id}")
 async def download_file(

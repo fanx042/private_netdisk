@@ -150,7 +150,23 @@ function HomePage() {
   // 下载文件
   const downloadFile = async (fileId, code = null) => {
     try {
+      // 第一步：先获取文件信息，确保下载计数更新
+      let infoUrl = `/api/files/${fileId}/info`;
+      if (code) {
+        infoUrl += `?download_code=${code}`;
+      }
+      
+      // 如果用户已登录，添加认证头
       const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      
+      await axios({
+        url: infoUrl,
+        method: 'GET',
+        headers,
+      });
+      
+      // 第二步：下载文件
       let url = `/api/files/${fileId}`;
       if (code) {
         url += `?download_code=${code}`;
@@ -160,7 +176,7 @@ function HomePage() {
         url,
         method: 'GET',
         responseType: 'blob',
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
 
       // 创建下载链接
@@ -215,6 +231,8 @@ function HomePage() {
       URL.revokeObjectURL(href);
       
       message.success('文件下载成功');
+      // 刷新文件列表以更新下载量
+      queryClient.invalidateQueries(['files']);
     } catch (error) {
       message.error(error.response?.data?.detail || '文件下载失败');
     }
@@ -223,7 +241,6 @@ function HomePage() {
   // 处理文件预览
   const handlePreview = async (fileId, isPrivateFile, fileDownloadCode, inputCode = null) => {
     try {
-      const token = localStorage.getItem('token');
       let url = `/api/files/${fileId}/preview`;
 
       // 使用传入的下载码或已有的下载码
@@ -242,10 +259,14 @@ function HomePage() {
         url += `?download_code=${code}`;
       }
 
+      // 如果用户已登录，添加认证头
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
       const response = await axios({
         url,
         method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         responseType: 'blob'
       });
 
@@ -366,7 +387,7 @@ function HomePage() {
       render: (text, record) => (
         <Space>
           <Text>{text}</Text>
-          {record.downloads > 0 && (
+          {(record.downloads || 0) > 0 && (
             <Tooltip title={`已下载 ${record.downloads} 次`}>
               <Badge count={record.downloads} overflowCount={999} size="small">
                 <CloudDownloadOutlined style={{ fontSize: '16px', color: '#1890ff' }} />
@@ -401,9 +422,9 @@ function HomePage() {
       title: '下载量',
       dataIndex: 'downloads',
       key: 'downloads',
-      sorter: (a, b) => a.downloads - b.downloads,
+      sorter: (a, b) => (a.downloads || 0) - (b.downloads || 0),
       render: (downloads) => (
-        <Tag color={downloads > 0 ? (downloads > 10 ? 'green' : 'blue') : 'default'}>
+        <Tag color={(downloads || 0) > 0 ? ((downloads || 0) > 10 ? 'green' : 'blue') : 'default'}>
           {downloads || 0} 次下载
         </Tag>
       ),

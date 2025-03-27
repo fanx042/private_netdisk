@@ -14,7 +14,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login", auto_error=False)
 
 # 密码处理
 def verify_password(plain_password, hashed_password):
@@ -52,23 +52,22 @@ def logout_user(db: Session, user: User):
     db.commit()
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    if not token:
+        return None
+        
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            raise credentials_exception
+            return None
+            
+        user = db.query(User).filter(User.username == username).first()
+        if user is None or user.active_token != token:
+            return None
+            
+        return user
     except JWTError:
-        raise credentials_exception
-    
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or user.active_token != token:
-        raise credentials_exception
-    return user
+        return None
 
 def check_file_access_permission(user: Optional[User], file_info, download_code: Optional[str] = None):
     """
