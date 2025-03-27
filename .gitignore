@@ -57,3 +57,4 @@ backend/uploads/
 backend/netdisk.db
 .DS_Store
 Thumbs.db
+backend/logs/

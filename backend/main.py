@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -8,6 +8,7 @@ from typing import List, Optional
 import os
 import random
 import string
+import logging
 from pathlib import Path
 from jose import JWTError, jwt
 
@@ -18,6 +19,16 @@ from auth import create_access_token, get_current_user, get_password_hash, verif
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
+
+# 配置日志记录
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+logging.basicConfig(
+    filename=LOG_DIR / "user_login.log",
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 app = FastAPI()
 
@@ -48,7 +59,7 @@ def generate_download_code():
 
 # 用户注册
 @app.post("/api/register", response_model=Token)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.username == user.username).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -60,13 +71,19 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     
     access_token = create_access_token(data={"sub": user.username}, db=db, user=db_user)
+    
+    # 记录注册信息
+    logging.info(f"New user registered - Username: {user.username}, IP: {request.client.host}")
+    
     return {"access_token": access_token, "token_type": "bearer"}
 
 # 用户登录
 @app.post("/api/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
+        # 记录登录失败信息
+        logging.warning(f"Failed login attempt - Username: {form_data.username}, IP: {request.client.host}")
         raise HTTPException(status_code=400, detail="用户名或密码不正确")
     
     # 检查是否已在其他设备登录
@@ -74,27 +91,31 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         try:
             # 验证旧token是否仍然有效
             jwt.decode(user.active_token, SECRET_KEY, algorithms=[ALGORITHM])
-            # 如果token仍然有效，说明用户已在其他设备登录
-            raise HTTPException(
-                status_code=400,
-                detail="Account is already logged in on another device"
-            )
+            # 即使token有效，我们也允许用户在新设备登录，并使旧token失效
+            logging.info(f"User {user.username} logged in from new device, invalidating previous session")
         except JWTError:
             # 如果token已过期，可以继续登录
-            pass
+            logging.info(f"Previous token for user {user.username} has expired")
     
     access_token = create_access_token(data={"sub": user.username}, db=db, user=user)
+    
+    # 记录登录成功信息
+    logging.info(f"Successful login - Username: {user.username}, IP: {request.client.host}")
+    
     return {"access_token": access_token, "token_type": "bearer"}
 
 # 用户注销
 @app.post("/api/logout")
-def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     logout_user(db, current_user)
+    # 记录注销信息
+    logging.info(f"User logged out - Username: {current_user.username}, IP: {request.client.host}")
     return {"message": "Successfully logged out"}
 
 # 上传文件
 @app.post("/api/files/upload")
 def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     is_private: bool = Form(False),
     download_code: Optional[str] = Form(None),
@@ -132,11 +153,16 @@ def upload_file(
     db.commit()
     db.refresh(db_file)
 
+    # 记录文件上传信息
+    logging.info(f"File uploaded - Username: {current_user.username}, Filename: {file.filename}, Private: {is_private}, IP: {request.client.host}")
+
     return {"message": "File uploaded successfully", "download_code": final_download_code if is_private else None}
 
 # 获取文件列表
 @app.get("/api/files", response_model=List[FileInfoResponse])
-def get_files(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_files(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 记录文件列表请求
+    logging.info(f"File list requested - Username: {current_user.username}, IP: {request.client.host}")
     files = db.query(FileInfo).order_by(FileInfo.upload_time.desc()).all()
     return [
         FileInfoResponse(
@@ -153,6 +179,7 @@ def get_files(current_user: User = Depends(get_current_user), db: Session = Depe
 # 下载文件
 @app.get("/api/files/{file_id}")
 def download_file(
+    request: Request,
     file_id: int,
     download_code: Optional[str] = None,
     current_user: User = Depends(get_current_user),
@@ -164,7 +191,11 @@ def download_file(
 
     if file.is_private and file.user_id != current_user.id:
         if not download_code or download_code != file.download_code:
+            logging.warning(f"Invalid download attempt - Username: {current_user.username}, File ID: {file_id}, IP: {request.client.host}")
             raise HTTPException(status_code=403, detail="Invalid download code")
+
+    # 记录文件下载信息
+    logging.info(f"File downloaded - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {request.client.host}")
 
     return FileResponse(
         path=file.filepath,
@@ -183,6 +214,7 @@ def get_user_info(current_user: User = Depends(get_current_user)):
 # 删除文件
 @app.delete("/api/files/{file_id}")
 def delete_file(
+    request: Request,
     file_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -206,15 +238,23 @@ def delete_file(
     db.delete(file)
     db.commit()
     
+    # 记录文件删除信息
+    logging.info(f"File deleted - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {request.client.host}")
+    
     return {"message": "File deleted successfully"}
 
 # 更新用户信息
 @app.put("/api/user/me")
 def update_user_info(
+    request: Request,
     new_password: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     current_user.hashed_password = get_password_hash(new_password)
     db.commit()
+    
+    # 记录密码更新信息
+    logging.info(f"Password updated - Username: {current_user.username}, IP: {request.client.host}")
+    
     return {"message": "Password updated successfully"}
