@@ -2,14 +2,8 @@
 cd ..\backend
 echo 正在启动后端服务...
 
-REM 检查是否已安装虚拟环境
-if not exist venv (
-    echo 创建虚拟环境...
-    python -m venv venv
-)
-
-REM 激活虚拟环境
-call venv\Scripts\activate.bat
+REM 激活conda虚拟环境_disk
+call conda activate _disk
 
 REM 安装依赖
 echo 安装依赖...
