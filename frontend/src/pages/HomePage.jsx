@@ -105,7 +105,7 @@ function HomePage() {
   const handleUpload = (info) => {
     const { file } = info;
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', info.file);
     formData.append('is_private', isPrivate);
     if (isPrivate && downloadCode) {
       formData.append('download_code', downloadCode);

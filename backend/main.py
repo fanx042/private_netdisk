@@ -660,6 +660,52 @@ def delete_file(
     
     return {"message": "File deleted successfully"}
 
+# 批量删除文件
+@app.delete("/api/files/batch")
+def batch_delete_files(
+    request: Request,
+    file_ids: List[int],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    deleted_files = []
+    failed_files = []
+
+    for file_id in file_ids:
+        file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
+        if not file:
+            failed_files.append({"id": file_id, "reason": "File not found"})
+            continue
+
+        try:
+            # 检查管理权限
+            check_file_management_permission(current_user, file)
+
+            # 删除物理文件
+            try:
+                os.remove(file.filepath)
+            except OSError:
+                # 如果文件不存在，继续删除数据库记录
+                pass
+
+            # 删除数据库记录
+            db.delete(file)
+            
+            # 记录文件删除信息
+            log_file_access(request, "deleted", file_id, file.filename, current_user)
+
+            deleted_files.append(file_id)
+        except Exception as e:
+            failed_files.append({"id": file_id, "reason": str(e)})
+
+    db.commit()
+
+    return {
+        "message": f"Batch delete completed. {len(deleted_files)} files deleted successfully, {len(failed_files)} failed.",
+        "deleted_files": deleted_files,
+        "failed_files": failed_files
+    }
+
 # 更新用户信息
 @app.put("/api/user/me")
 def update_user_info(
