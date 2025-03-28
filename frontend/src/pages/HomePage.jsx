@@ -103,7 +103,7 @@ function HomePage() {
 
   // 处理上传
   const handleUpload = (info) => {
-    const { file } = info;
+    // const { file } = info;
     const formData = new FormData();
     formData.append('file', info.file);
     formData.append('is_private', isPrivate);
