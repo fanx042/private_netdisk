@@ -260,7 +260,7 @@ def logout(request: Request, current_user: User = Depends(get_current_user), db:
     log_user_activity(request, "User logged out", current_user.username)
     return {"message": "Successfully logged out"}
 
-# 上传文件
+
 # 辅助函数：获取允许的文件扩展名和MIME类型映射
 def get_allowed_extensions():
     """返回允许上传的文件扩展名和对应的MIME类型"""
@@ -278,18 +278,20 @@ def get_allowed_extensions():
         '.rar': 'application/x-rar-compressed'
     }
 
+
+# 上传文件
 @app.post("/api/files/upload")
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     is_private: bool = Form(False),
     download_code: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # 检查文件格式
     allowed_extensions = get_allowed_extensions()
-    
+
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail="File type not allowed")
@@ -338,7 +340,7 @@ async def upload_file(
     db.refresh(db_file)
 
     # 记录文件上传信息
-    log_file_access(request, "uploaded", db_file.id, file.filename, current_user, f"Private: {is_private}")
+    log_file_access(request, "uploaded", db_file.id, file.filename, 0, current_user, f"Private: {is_private}")
 
     return {
         "message": "File uploaded successfully", 
@@ -362,7 +364,6 @@ def get_files(request: Request, current_user: User = Depends(get_current_user), 
             FileInfoResponse(
                 id=file.id,
                 filename=file.filename,
-                filepath=file.filepath,
                 upload_time=file.upload_time,
                 uploader=file.user.username,
                 is_private=file.is_private,
@@ -418,7 +419,6 @@ async def get_file_info(
         return {
             "id": file.id,
             "filename": file.filename,
-            "filepath": file.filepath,
             "upload_time": file.upload_time,
             "uploader": file.user.username,
             "is_private": file.is_private,

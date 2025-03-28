@@ -52,12 +52,12 @@ function PreviewPage() {
         const response = await axios.get(url, { headers });
 
         // 调试信息，查看API返回的数据结构
-        console.log('File info response:', response.data);
+        // console.log('File info response:', response.data);
 
         // 如果是私密文件且有下载码，再次请求以获取完整信息
         if (response.data.is_private && downloadCode) {
           const fullResponse = await axios.get(`${url}?download_code=${downloadCode}`, { headers });
-          console.log('Full file info with download code:', fullResponse.data);
+          // console.log('Full file info with download code:', fullResponse.data);
           setFileInfo(fullResponse.data);
           setSavedDownloadCode(downloadCode);
           downloadForm.setFieldsValue({ downloadCode });

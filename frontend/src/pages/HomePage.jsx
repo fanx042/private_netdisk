@@ -103,8 +103,9 @@ function HomePage() {
 
   // 处理上传
   const handleUpload = (info) => {
+    const { file } = info;
     const formData = new FormData();
-    formData.append('file', info.file);
+    formData.append('file', file);
     formData.append('is_private', isPrivate);
     if (isPrivate && downloadCode) {
       formData.append('download_code', downloadCode);
@@ -270,19 +271,6 @@ function HomePage() {
       title: '文件名',
       dataIndex: 'filename',
       key: 'filename',
-      render: (text, record) => (
-        <Space>
-
-          <Text>{text}</Text>
-          {(record.downloads || 0) == 0 && (
-            <Tooltip title={`已下载 ${record.downloads} 次`}>
-              <Badge count={record.downloads} overflowCount={999} size="small">
-                <CloudDownloadOutlined style={{ fontSize: '16px', color: '#1890ff' }} />
-              </Badge>
-            </Tooltip>
-          )}
-        </Space>
-      ),
     },
     {
       title: '上传时间',
@@ -457,7 +445,7 @@ function HomePage() {
     textarea.style.position = 'fixed'; // 防止页面滚动
     textarea.style.opacity = '0';
     document.body.appendChild(textarea);
-    textarea.value += `?download_code=${currentShareFile.downloadCode}`;
+    textarea.value += `?download_code=${currentShareFile.download_code}`;
     try {
       // 选择文本
       textarea.select();
