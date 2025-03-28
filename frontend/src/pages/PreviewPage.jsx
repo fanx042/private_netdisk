@@ -3,17 +3,10 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { Card, Button, Input, Form, Modal, message, Space, Typography, Tooltip, Badge, Statistic } from 'antd';
 import { DownloadOutlined, EyeOutlined, CopyOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
+import FilePreview from '../components/FilePreview';
+import { formatFileSize, copyToClipboard, downloadFile, fetchFileInfo } from '../utils/fileUtils';
 
 const { Text, Title } = Typography;
-
-// 格式化文件大小
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-};
 
 function PreviewPage() {
   const { fileId } = useParams();
@@ -28,52 +21,7 @@ function PreviewPage() {
   const [fileError, setFileError] = useState(null);
   const [savedDownloadCode, setSavedDownloadCode] = useState(downloadCode || '');
 
-  // 复制文本到剪贴板的通用函数
-  const copyToClipboard = (text) => {
-    // 创建一个临时的textarea元素
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed'; // 防止页面滚动
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    
-    try {
-      // 选择文本
-      textarea.select();
-      textarea.setSelectionRange(0, 99999); // 兼容移动设备
-      
-      // 尝试使用新API
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text)
-          .then(() => {
-            message.success('复制成功');
-          })
-          .catch(() => {
-            // 如果新API失败，回退到document.execCommand
-            const successful = document.execCommand('copy');
-            if (successful) {
-              message.success('复制成功');
-            } else {
-              message.error('复制失败，请手动复制');
-            }
-          });
-      } else {
-        // 在不支持新API的环境中使用旧方法
-        const successful = document.execCommand('copy');
-        if (successful) {
-          message.success('复制成功');
-        } else {
-          message.error('复制失败，请手动复制');
-        }
-      }
-    } catch (err) {
-      console.error('Copy failed:', err);
-      message.error('复制失败，请手动复制');
-    } finally {
-      // 清理临时元素
-      document.body.removeChild(textarea);
-    }
-  };
+  // 使用 fileUtils 中的 copyToClipboard
 
   // 检查文件是否存在并可访问
   const checkFileExists = async (url, headers = {}) => {
@@ -92,39 +40,40 @@ function PreviewPage() {
         setLoading(true);
         let url = `/api/files/${fileId}/info`;
 
-        // 如果URL中有下载码，将其添加到请求参数中
-        const params = downloadCode ? { download_code: downloadCode } : {};
-
         // 获取token（如果用户已登录）
         const token = localStorage.getItem('token');
-        // 如果用户已登录，添加Authorization header
         const headers = {};
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const response = await axios.get(url, { headers, params });
+        // 首先尝试获取基本信息，不带下载码
+        const response = await axios.get(url, { headers });
+
+        // 调试信息，查看API返回的数据结构
+        console.log('File info response:', response.data);
+
+        // 如果是私密文件且有下载码，再次请求以获取完整信息
+        if (response.data.is_private && downloadCode) {
+          const fullResponse = await axios.get(`${url}?download_code=${downloadCode}`, { headers });
+          console.log('Full file info with download code:', fullResponse.data);
+          setFileInfo(fullResponse.data);
+          setSavedDownloadCode(downloadCode);
+          downloadForm.setFieldsValue({ downloadCode });
+        } else {
+          setFileInfo(response.data);
+        }
         setFileInfo(response.data);
         
-        // 如果URL中有下载码或响应中包含下载码，自动填入表单并保存
-        if (downloadCode || response.data.download_code) {
-          const codeToSave = downloadCode || response.data.download_code;
-          downloadForm.setFieldsValue({ downloadCode: codeToSave });
-          setSavedDownloadCode(codeToSave);
+        // 如果URL中有下载码，保存它以便后续使用
+        if (downloadCode) {
+          downloadForm.setFieldsValue({ downloadCode });
+          setSavedDownloadCode(downloadCode);
         }
       } catch (error) {
         console.error('获取文件信息失败', error);
         if (error.response?.status === 404) {
           setFileError('文件不存在或已被删除');
-        } else if (error.response?.status === 403) {
-          if (error.response?.data?.detail?.includes('private file') ||
-            error.response?.data?.detail?.includes('Please provide download code')) {
-          // 如果是私密文件且没有提供下载码，立即显示下载码输入框
-            setFileError('这是一个私密文件，请输入下载码访问');
-            setCodeModalVisible(true);
-          } else {
-            setFileError('没有权限访问此文件');
-          }
         } else {
           setFileError('获取文件信息失败');
         }
@@ -143,14 +92,30 @@ function PreviewPage() {
     try {
       setLoading(true);
       
+      // 如果是私密文件且没有下载码
+      if (fileInfo.is_private && !savedDownloadCode) {
+        setIsPreviewMode(true);
+        setCodeModalVisible(true);
+        setLoading(false);
+        return;
+      }
+
       // 构建API URL
       let apiUrl = `/api/files/${fileId}/preview`;
       if (savedDownloadCode) {
         apiUrl += `?download_code=${savedDownloadCode}`;
       }
 
+      // 获取token（如果用户已登录）
+      const token = localStorage.getItem('token');
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       // 获取文件内容
       const response = await axios.get(apiUrl, {
+        headers,
         responseType: 'blob'
       });
 
@@ -305,7 +270,15 @@ function PreviewPage() {
       setLoading(true);
       let url = `/api/files/${fileId}`;
       
-      // 使用输入的下载码或保存的下载码
+      // 如果是私密文件且没有下载码
+      if (fileInfo.is_private && !savedDownloadCode && !inputCode) {
+        setIsPreviewMode(false);
+        setCodeModalVisible(true);
+        setLoading(false);
+        return;
+      }
+
+      // 如果有下载码（输入的或保存的），添加到URL
       const code = inputCode || savedDownloadCode;
       if (code) {
         url += `?download_code=${code}`;
@@ -424,9 +397,11 @@ function PreviewPage() {
             <Title level={3}>
               {fileInfo?.filename || '文件分享'}
               {fileInfo?.is_private && (
-                <Text type="warning" style={{ fontSize: '16px', marginLeft: '12px' }}>
-                  (私密文件)
-                </Text>
+                  <Tooltip title="需要下载码才能预览或下载">
+                    <Text type="warning" style={{ fontSize: '16px', marginLeft: '12px' }}>
+                      (私密文件)
+                    </Text>
+                  </Tooltip>
               )}
             </Title>
             
@@ -449,12 +424,12 @@ function PreviewPage() {
                         <Text><strong>文件大小:</strong> {fileInfo.file_size ? formatFileSize(fileInfo.file_size) : '未知'}</Text>
                         <Text><strong>文件类型:</strong> {fileInfo.file_type || '未知'}</Text>
                       </Space>
-                      {fileInfo.downloads !== undefined && (
-                        <Badge count={fileInfo.downloads} overflowCount={9999} style={{ backgroundColor: '#52c41a' }}>
+                      {fileInfo.download_count !== undefined && (
+                        <Badge count={fileInfo.download_count} overflowCount={9999} style={{ backgroundColor: '#52c41a' }}>
                           <Card size="small" style={{ width: 100, textAlign: 'center' }}>
                             <Statistic
                               title="下载"
-                              value={fileInfo.downloads}
+                              value={fileInfo.download_count}
                               prefix={<CloudDownloadOutlined />}
                               valueStyle={{ fontSize: '16px', color: '#52c41a' }}
                             />
@@ -471,11 +446,7 @@ function PreviewPage() {
                       icon={<EyeOutlined />}
                       onClick={() => {
                         setIsPreviewMode(true);
-                        if (fileInfo?.is_private && !savedDownloadCode) {
-                          setCodeModalVisible(true);
-                        } else {
-                          handlePreview();
-                        }
+                        handlePreview();
                       }}
                       loading={loading}
                       disabled={!fileInfo?.can_preview}
@@ -488,11 +459,7 @@ function PreviewPage() {
                   icon={<DownloadOutlined />}
                   onClick={() => {
                     setIsPreviewMode(false);
-                    if (fileInfo?.is_private && !savedDownloadCode) {
-                      setCodeModalVisible(true);
-                    } else {
-                      handleDownload();
-                    }
+                    handleDownload();
                   }}
                   loading={loading}
                 >
@@ -531,7 +498,7 @@ function PreviewPage() {
                       </Space>
                     </Space>
                   ) : (
-                    <Text>这是一个私密文件，您需要输入下载码才能访问。</Text>
+                        <Text>这是一个私密文件，预览或下载时需要输入下载码。</Text>
                   )}
                 </div>
               ) : (
@@ -547,10 +514,6 @@ function PreviewPage() {
         open={codeModalVisible}
         onOk={handleCodeSubmit}
         onCancel={() => {
-          // 如果用户在初始加载时取消输入下载码，显示提示信息
-          if (!fileInfo) {
-            setFileError('需要下载码才能访问此私密文件');
-          }
           setCodeModalVisible(false);
         }}
         okText={isPreviewMode ? "预览" : "下载"}

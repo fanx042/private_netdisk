@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTask
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, Response
+from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from typing import Optional
@@ -30,7 +31,6 @@ def ensure_chinese_font():
                 shutil.copy(str(windows_font), str(font_file))
             else:
                 # 如果Windows字体不存在，使用内置的DejaVuSans
-                from reportlab.pdfbase.ttfonts import TTFont
                 pdfmetrics.registerFont(TTFont('Chinese', 'DejaVuSans.ttf'))
                 return 'DejaVuSans'
         except Exception as e:
@@ -187,6 +187,15 @@ def generate_download_code():
     return ''.join(random.choices(string.digits, k=4))
 
 # 用户注册
+# 辅助函数：记录用户活动日志
+def log_user_activity(request, action, username, extra_info=None):
+    """统一记录用户活动日志"""
+    client_ip = get_client_ip(request)
+    log_message = f"{action} - Username: {username}, IP: {client_ip}"
+    if extra_info:
+        log_message += f", {extra_info}"
+    logging.info(log_message)
+
 @app.post("/api/register", response_model=Token)
 def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.username == user.username).first()
@@ -202,8 +211,7 @@ def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     access_token = create_access_token(data={"sub": user.username}, db=db, user=db_user)
     
     # 记录注册信息
-    client_ip = get_client_ip(request)
-    logging.info(f"New user registered - Username: {user.username}, IP: {client_ip}")
+    log_user_activity(request, "New user registered", user.username)
     
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -213,8 +221,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         # 记录登录失败信息
-        client_ip = get_client_ip(request)
-        logging.warning(f"Failed login attempt - Username: {form_data.username}, IP: {client_ip}")
+        log_user_activity(request, "Failed login attempt", form_data.username)
         raise HTTPException(status_code=400, detail="用户名或密码不正确")
     
     # 检查是否已在其他设备登录
@@ -231,8 +238,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     access_token = create_access_token(data={"sub": user.username}, db=db, user=user)
     
     # 记录登录成功信息
-    client_ip = get_client_ip(request)
-    logging.info(f"Successful login - Username: {user.username}, IP: {client_ip}")
+    log_user_activity(request, "Successful login", user.username)
     
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -241,22 +247,14 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
 def logout(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     logout_user(db, current_user)
     # 记录注销信息
-    client_ip = get_client_ip(request)
-    logging.info(f"User logged out - Username: {current_user.username}, IP: {client_ip}")
+    log_user_activity(request, "User logged out", current_user.username)
     return {"message": "Successfully logged out"}
 
 # 上传文件
-@app.post("/api/files/upload")
-async def upload_file(
-    request: Request,
-    file: UploadFile = File(...),
-    is_private: bool = Form(False),
-    download_code: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    # 检查文件格式
-    allowed_extensions = {
+# 辅助函数：获取允许的文件扩展名和MIME类型映射
+def get_allowed_extensions():
+    """返回允许上传的文件扩展名和对应的MIME类型"""
+    return {
         '.txt': 'text/plain',
         '.pdf': 'application/pdf',
         '.doc': 'application/msword',
@@ -269,6 +267,18 @@ async def upload_file(
         '.zip': 'application/zip',
         '.rar': 'application/x-rar-compressed'
     }
+
+@app.post("/api/files/upload")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    is_private: bool = Form(False),
+    download_code: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # 检查文件格式
+    allowed_extensions = get_allowed_extensions()
     
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in allowed_extensions:
@@ -318,8 +328,7 @@ async def upload_file(
     db.refresh(db_file)
 
     # 记录文件上传信息
-    client_ip = get_client_ip(request)
-    logging.info(f"File uploaded - Username: {current_user.username}, Filename: {file.filename}, Private: {is_private}, IP: {client_ip}")
+    log_file_access(request, "uploaded", db_file.id, file.filename, current_user, f"Private: {is_private}")
 
     return {
         "message": "File uploaded successfully", 
@@ -331,8 +340,7 @@ async def upload_file(
 @app.get("/api/files", response_model=List[FileInfoResponse])
 def get_files(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # 记录文件列表请求
-    client_ip = get_client_ip(request)
-    logging.info(f"File list requested - Username: {current_user.username}, IP: {client_ip}")
+    log_user_activity(request, "File list requested", current_user.username)
     
     # 获取所有文件
     files = db.query(FileInfo).order_by(FileInfo.upload_time.desc()).all()
@@ -349,14 +357,33 @@ def get_files(request: Request, current_user: User = Depends(get_current_user), 
                 is_private=file.is_private,
                 # 只有文件上传者可以看到下载码
                 download_code=file.download_code if file.user_id == current_user.id else None,
+                downloads=file.downloads,
                 file_type=file.file_type,
-                can_preview=file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']
+                can_preview=is_file_previewable(file.file_type)
             )
         )
     
     return file_list
 
 # 获取文件信息
+# 辅助函数：检查文件是否可预览
+def is_file_previewable(file_type):
+    """检查文件类型是否支持预览"""
+    return file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']
+
+# 辅助函数：记录文件访问日志
+def log_file_access(request, action, file_id, filename, downloads=None, current_user=None, extra_info=None):
+    """统一记录文件访问日志"""
+    client_ip = get_client_ip(request)
+    user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
+    if action == 'downloaded':
+        log_message = f"File {action} - {user_info}, File ID: {file_id}, Filename: {filename}, Downloads: {downloads} IP: {client_ip}"
+    else:
+        log_message = f"File {action} - {user_info}, File ID: {file_id}, Filename: {filename}, IP: {client_ip}"
+    if extra_info:
+        log_message += f", {extra_info}"
+    logging.info(log_message)
+
 @app.get("/api/files/{file_id}/info")
 async def get_file_info(
     request: Request,
@@ -373,23 +400,10 @@ async def get_file_info(
         
         # 如果是私密文件，需要验证访问权限
         if file.is_private:
-            # 如果用户未登录且未提供下载码，或者提供的下载码不正确
-            if not current_user and (not download_code or download_code != file.download_code):
-                raise HTTPException(
-                    status_code=403,
-                    detail="This is a private file. Please provide download code."
-                )
-            # 如果用户已登录但不是文件所有者，且未提供正确的下载码
-            elif current_user and current_user.id != file.user_id and (not download_code or download_code != file.download_code):
-                raise HTTPException(
-                    status_code=403,
-                    detail="This is a private file. Please provide download code."
-                )
+            check_file_access_permission(current_user, file, download_code)
 
         # 记录文件信息访问
-        client_ip = get_client_ip(request)
-        user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
-        logging.info(f"File info accessed - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+        log_file_access(request, "info accessed", file_id, file.filename, current_user)
         
         # 返回文件基本信息
         return {
@@ -399,9 +413,11 @@ async def get_file_info(
             "uploader": file.user.username,
             "is_private": file.is_private,
             "file_type": file.file_type,
-            "can_preview": file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf'],
+            "can_preview": is_file_previewable(file.file_type),
             # 只有在以下情况下返回下载码：1.文件所有者 2.提供了正确的下载码
-            "download_code": file.download_code if (current_user and current_user.id == file.user_id) or (download_code and download_code == file.download_code) else None
+            "download_code": file.download_code if (current_user and current_user.id == file.user_id) or (download_code and download_code == file.download_code) else None,
+            "size": os.path.getsize(file.filepath) if os.path.exists(file.filepath) else 0,
+            "downloads": file.downloads or 0
         }
     except HTTPException:
         raise
@@ -444,10 +460,9 @@ async def download_file(
         file.downloads = (file.downloads or 0) + 1
         db.commit()
         
+        
         # 记录下载信息
-        client_ip = get_client_ip(request)
-        user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
-        logging.info(f"File downloaded - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+        log_file_access(request, "downloaded", file_id, file.filename, file.downloads, current_user)
         
         # 获取请求的语言
         accept_language = request.headers.get("accept-language", "").lower()
@@ -485,44 +500,7 @@ async def download_file(
         logging.error(f"Error downloading file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="文件下载失败，请稍后重试")
 
-@app.get("/api/files/{file_id}/info")
-async def get_file_info(
-    request: Request,
-    file_id: int,
-    download_code: str = None,
-    current_user: Optional[User] = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """获取文件基本信息（不包含下载码）"""
-    file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
-    if not file:
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    # 检查访问权限 - 对于公开文件，即使未登录也可以访问
-    if file.is_private:
-        # 私密文件需要检查权限
-        check_file_access_permission(current_user, file, download_code)
-    # 公开文件可以直接访问，无需权限检查
-    
-    # 记录信息请求
-    client_ip = get_client_ip(request)
-    user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
-    logging.info(f"File info requested - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
-    
-    # 返回文件基本信息
-    return {
-        "id": file.id,
-        "filename": file.filename,
-        "file_type": file.file_type,
-        "size": os.path.getsize(file.filepath) if os.path.exists(file.filepath) else 0,
-        "is_private": file.is_private,
-        "uploader": file.user.username if file.user else None,
-        "upload_time": file.upload_time,
-        "downloads": file.downloads or 0,
-        "can_preview": file.file_type in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf'],
-        # 只有文件所有者才能看到下载码
-        "download_code": file.download_code if current_user and file.user_id == current_user.id else None
-    }
+# 删除重复的get_file_info路由，已经在上面定义过了
 
 # 获取用户信息
 @app.get("/api/user/me")
@@ -550,19 +528,16 @@ async def preview_file(
     if file.is_private:
         # 私密文件需要检查权限
         check_file_access_permission(current_user, file, download_code)
-    # 公开文件可以直接访问，无需权限检查
     
     if not os.path.exists(file.filepath):
         raise HTTPException(status_code=404, detail="文件不存在")
     
     # 检查文件是否可预览
-    if file.file_type not in ['text/plain', 'image/jpeg', 'image/png', 'application/pdf']:
+    if not is_file_previewable(file.file_type):
         raise HTTPException(status_code=400, detail="此文件类型不支持预览")
     
     # 记录预览信息
-    client_ip = get_client_ip(request)
-    user_info = f"Username: {current_user.username}" if current_user else "Unauthenticated user"
-    logging.info(f"File previewed - {user_info}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+    log_file_access(request, "previewed", file_id, file.filename, current_user)
     
     try:
         # 确保文件路径是绝对路径
@@ -600,7 +575,6 @@ async def preview_file(
                 
                 # 确保中文字体可用
                 font_name = ensure_chinese_font()
-                
                 # 转换为PDF
                 pdf_path = text_to_pdf(content, font_name)
                 
@@ -612,10 +586,11 @@ async def preview_file(
                     headers={
                         'Content-Disposition': f'inline; filename="{file.filename}.pdf"'
                     },
-                    background=BackgroundTask(lambda: os.unlink(pdf_path))  # 清理临时PDF文件
+                    background=BackgroundTasks(lambda: os.unlink(pdf_path))  # 清理临时PDF文件
                 )
             except Exception as e:
                 logging.error(f"Error converting text to PDF: {str(e)}")
+                
                 raise HTTPException(
                     status_code=400,
                     detail=f"无法转换文件为PDF：{str(e)}"
@@ -668,8 +643,7 @@ def delete_file(
     db.commit()
     
     # 记录文件删除信息
-    client_ip = get_client_ip(request)
-    logging.info(f"File deleted - Username: {current_user.username}, File ID: {file_id}, Filename: {file.filename}, IP: {client_ip}")
+    log_file_access(request, "deleted", file_id, file.filename, current_user)
     
     return {"message": "File deleted successfully"}
 
@@ -685,7 +659,6 @@ def update_user_info(
     db.commit()
     
     # 记录密码更新信息
-    client_ip = get_client_ip(request)
-    logging.info(f"Password updated - Username: {current_user.username}, IP: {client_ip}")
+    log_user_activity(request, "Password updated", current_user.username)
     
     return {"message": "Password updated successfully"}

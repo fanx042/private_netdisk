@@ -1,37 +1,28 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Table,
-  Button,
-  Upload,
-  message,
-  Card,
-  Switch,
-  Input,
-  Modal,
-  Form,
-  Space,
-  Typography,
-  Tag,
-  Tooltip,
-  Badge,
-} from 'antd';
+  Table, Button, Upload, message,
+  Card, Switch, Input,
+  Modal, Form, Space, Typography,
+  Tag, Tooltip, Badge,
+} from 'antd';  
+// UI Components and Icons
+
 import {
-  UploadOutlined,
-  DownloadOutlined,
-  KeyOutlined,
-  DeleteOutlined,
-  InboxOutlined,
-  EyeOutlined,
-  SearchOutlined,
-  ShareAltOutlined,
-  CloudDownloadOutlined,
+  UploadOutlined, DownloadOutlined, KeyOutlined,
+  DeleteOutlined, InboxOutlined, EyeOutlined,
+  SearchOutlined, ShareAltOutlined, CloudDownloadOutlined,
 } from '@ant-design/icons';
+
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import FilePreview from '../components/FilePreview';
+import { formatFileSize, copyToClipboard, downloadFile } from '../utils/fileUtils';
 
-const { Text, Paragraph } = Typography;
-const { Dragger } = Upload;
+// Typography是antd库中的一个文字排版组件，提供了一系列用于文本展示的子组件，如Text、Title、Paragraph等，用于更好地控制文本的样式和排版。
+const { Text, Paragraph } = Typography; 
+// Dragger是Upload组件的一个子组件，专门用于实现拖拽上传的功能。通过拖拽文件到指定区域，触发文件上传操作。
+const { Dragger } = Upload;  
 
 function HomePage() {
   const { user } = useAuth();
@@ -134,107 +125,12 @@ function HomePage() {
   };
 
   // 处理下载
-  const handleDownload = (fileId, isPrivateFile, fileDownloadCode) => {
-    // 如果是自己的文件或者是公开文件，直接下载
-    if (!isPrivateFile || fileDownloadCode) {
-      downloadFile(fileId);
-      return;
-    }
-
-    // 如果是私密文件且不是自己的，显示输入下载码的对话框
-    setCurrentFileId(fileId);
-    setDownloadModalVisible(true);
-    setIsPreviewMode(false); // 标记为下载模式
-  };
-
-  // 下载文件
-  const downloadFile = async (fileId, code = null) => {
+  const handleDownload = async (fileId, fileName) => {
     try {
-      // 第一步：先获取文件信息，确保下载计数更新
-      let infoUrl = `/api/files/${fileId}/info`;
-      if (code) {
-        infoUrl += `?download_code=${code}`;
-      }
-      
-      // 如果用户已登录，添加认证头
-      const token = localStorage.getItem('token');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      
-      await axios({
-        url: infoUrl,
-        method: 'GET',
-        headers,
-      });
-      
-      // 第二步：下载文件
-      let url = `/api/files/${fileId}`;
-      if (code) {
-        url += `?download_code=${code}`;
-      }
-
-      const response = await axios({
-        url,
-        method: 'GET',
-        responseType: 'blob',
-        headers,
-      });
-
-      // 创建下载链接
-      const href = URL.createObjectURL(response.data);
-      const link = document.createElement('a');
-      
-      // 从响应头中获取文件名
-      const contentDisposition = response.headers['content-disposition'];
-      let filename = '';
-      
-      // 尝试从Content-Disposition头获取文件名
-      if (contentDisposition) {
-        // 首先尝试获取 filename* 参数（RFC 5987）
-        const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
-        if (filenameStarMatch) {
-          // 处理 UTF-8 编码的文件名
-          try {
-            filename = decodeURIComponent(filenameStarMatch[1]);
-          } catch (e) {
-            console.error('Error decoding filename*:', e);
-          }
-        }
-        
-        // 如果 filename* 解析失败，尝试普通 filename
-        if (!filename) {
-          const filenameMatch = contentDisposition.match(/filename=\"([^\"]+)\"|filename=([^;]+)/);
-          if (filenameMatch) {
-            try {
-              filename = decodeURIComponent(filenameMatch[1] || filenameMatch[2]);
-            } catch (e) {
-              console.error('Error decoding filename:', e);
-              // 如果解码失败，直接使用原始值
-              filename = filenameMatch[1] || filenameMatch[2];
-            }
-          }
-        }
-      }
-      
-      // 如果无法从响应头获取文件名，使用files数据中的文件名
-      if (!filename) {
-        const fileInfo = files?.find(f => f.id === fileId);
-        filename = fileInfo ? fileInfo.filename : 'unknown_file';
-      }
-      
-      link.href = href;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      
-      // 清理
-      document.body.removeChild(link);
-      URL.revokeObjectURL(href);
-      
-      message.success('文件下载成功');
-      // 刷新文件列表以更新下载量
-      queryClient.invalidateQueries(['files']);
+      await downloadFile(fileId, null, fileName);
+      message.success('下载成功');
     } catch (error) {
-      message.error(error.response?.data?.detail || '文件下载失败');
+      message.error('下载失败: ' + (error.response?.data?.detail || error.message));
     }
   };
 
@@ -361,6 +257,8 @@ function HomePage() {
       setIsPreviewMode(false); // 重置模式
     });
   };
+
+  // 表格列配置
   const columns = [
     {
       title: '文件名',
@@ -368,8 +266,9 @@ function HomePage() {
       key: 'filename',
       render: (text, record) => (
         <Space>
+
           <Text>{text}</Text>
-          {(record.downloads || 0) > 0 && (
+          {(record.downloads || 0) == 0 && (
             <Tooltip title={`已下载 ${record.downloads} 次`}>
               <Badge count={record.downloads} overflowCount={999} size="small">
                 <CloudDownloadOutlined style={{ fontSize: '16px', color: '#1890ff' }} />
@@ -406,7 +305,7 @@ function HomePage() {
       key: 'downloads',
       sorter: (a, b) => (a.downloads || 0) - (b.downloads || 0),
       render: (downloads) => (
-        <Tag color={(downloads || 0) > 0 ? ((downloads || 0) > 10 ? 'green' : 'blue') : 'default'}>
+        <Tag color={(downloads || 0) > 0 ? ((downloads || 0) > 10 ? 'green' : 'blue') : 'default'} >
           {downloads || 0} 次下载
         </Tag>
       ),
@@ -484,18 +383,47 @@ function HomePage() {
           </Button>
         );
 
+        // 添加调试按钮，用于打印record的所有信息
+        const debugButton = (
+          <Button
+            size="small"
+            type="link"
+            onClick={() => {
+              console.log('文件记录完整信息:', record);
+              // 可选：使用更友好的方式在UI中显示
+              Modal.info({
+                title: '文件记录详情',
+                width: '80%',
+                content: (
+                  <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
+                    <pre>{JSON.stringify(record, null, 2)}</pre>
+                  </div>
+                ),
+              });
+            }}
+          >
+            查看详情
+          </Button>
+        );
+
         // 使用表格布局确保按钮对齐
         return (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, auto)',
-            gap: '8px',
-            alignItems: 'center'
-          }}>
-            {previewButton}
-            {downloadButton}
-            {shareButton}
-            {deleteButton}
+          <div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, auto)',
+              gap: '8px',
+              alignItems: 'center',
+              marginBottom: '8px'
+            }}>
+              {previewButton}
+              {downloadButton}
+              {shareButton}
+              {deleteButton}
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              {debugButton}
+            </div>
           </div>
         );
       }
