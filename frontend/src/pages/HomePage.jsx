@@ -125,9 +125,17 @@ function HomePage() {
   };
 
   // 处理下载
-  const handleDownload = async (fileId, fileName) => {
+  const handleDownload = async (fileId, isPrivateFile, fileDownloadCode, inputCode = null) => {
     try {
-      await downloadFile(fileId, null, fileName);
+      const code = inputCode || fileDownloadCode;
+      if (isPrivateFile && !code) {
+        setCurrentFileId(fileId);
+        setDownloadModalVisible(true);
+        return;
+      };
+
+      await downloadFile(fileId, code);
+
       message.success('下载成功');
     } catch (error) {
       message.error('下载失败: ' + (error.response?.data?.detail || error.message));
@@ -138,10 +146,8 @@ function HomePage() {
   const handlePreview = async (fileId, isPrivateFile, fileDownloadCode, inputCode = null) => {
     try {
       let url = `/api/files/${fileId}/preview`;
-
       // 使用传入的下载码或已有的下载码
       const code = inputCode || fileDownloadCode;
-
       if (isPrivateFile && !code) {
         // 如果是私密文件且没有下载码，显示输入下载码的对话框
         setCurrentFileId(fileId);
@@ -154,11 +160,11 @@ function HomePage() {
       if (code) {
         url += `?download_code=${code}`;
       }
-
       // 如果用户已登录，添加认证头
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
+      // 发起请求获取文件内容
       const response = await axios({
         url,
         method: 'GET',
@@ -389,7 +395,6 @@ function HomePage() {
             size="small"
             type="link"
             onClick={() => {
-              console.log('文件记录完整信息:', record);
               // 可选：使用更友好的方式在UI中显示
               Modal.info({
                 title: '文件记录详情',
@@ -452,7 +457,7 @@ function HomePage() {
     textarea.style.position = 'fixed'; // 防止页面滚动
     textarea.style.opacity = '0';
     document.body.appendChild(textarea);
-
+    textarea.value += `?download_code=${currentShareFile.downloadCode}`;
     try {
       // 选择文本
       textarea.select();
@@ -624,7 +629,9 @@ function HomePage() {
         )}
         
         <div style={{ marginBottom: 16 }}>
-          <Text strong>分享链接：</Text>
+          <Text strong>
+            {currentShareFile?.is_private ? "分享链接（无下载码）" : "分享链接"}
+          </Text>
           <Paragraph copyable style={{ marginTop: 8 }}>
             {currentShareLink}
           </Paragraph>

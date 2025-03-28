@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import User
+import logging
 
 # 配置
 SECRET_KEY = "your-secret-key-here"  # 在生产环境中应该使用环境变量
@@ -27,9 +28,9 @@ def get_password_hash(password):
 def create_access_token(data: dict, db: Session, user: User, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     
@@ -54,7 +55,7 @@ def logout_user(db: Session, user: User):
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     if not token:
         return None
-        
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -64,9 +65,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         user = db.query(User).filter(User.username == username).first()
         if user is None or user.active_token != token:
             return None
-            
+        
         return user
-    except JWTError:
+    except JWTError as e:
+        logging.error(f"JWTError: {e}")
         return None
 
 def check_file_access_permission(user: Optional[User], file_info, download_code: Optional[str] = None):

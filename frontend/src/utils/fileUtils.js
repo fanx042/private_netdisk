@@ -84,10 +84,12 @@ export const fetchFileInfo = async (fileId, downloadCode = null) => {
 // 下载文件
 export const downloadFile = async (fileId, downloadCode = null, filename = null) => {
   let url = `/api/files/${fileId}`;
+
   if (downloadCode) {
     url += `?download_code=${downloadCode}`;
   }
   
+  // console.log('downloadCode:', url);
   const token = localStorage.getItem('token');
   const headers = {
     'Accept-Language': 'zh-CN',

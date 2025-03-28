@@ -23,6 +23,7 @@ export function AuthProvider({ children }) {
       const response = await axios.get('/api/user/me', {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // console.log('User info:', response.data);
       setUser(response.data);
       setIsAuthenticated(true);
     } catch (error) {
@@ -40,6 +41,8 @@ export function AuthProvider({ children }) {
 
     const response = await axios.post('/api/login', formData);
     const { access_token } = response.data;
+    // console.log('Response: ', response);
+    // console.log('Access_token: ', access_token);
     localStorage.setItem('token', access_token);
     await fetchUserInfo();
   };

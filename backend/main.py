@@ -34,7 +34,7 @@ def ensure_chinese_font():
                 pdfmetrics.registerFont(TTFont('Chinese', 'DejaVuSans.ttf'))
                 return 'DejaVuSans'
         except Exception as e:
-            print(f"Font setup error: {e}")
+            logging.error(f"Font setup error: {e}")
             # 如果出错，使用内置的DejaVuSans
             return 'DejaVuSans'
     
@@ -44,53 +44,58 @@ def ensure_chinese_font():
         return 'Chinese'
     except:
         # 如果注册失败，使用内置的DejaVuSans
+        logging.error(f"Font setup error: {e}")
         pdfmetrics.registerFont(TTFont('Chinese', 'DejaVuSans.ttf'))
         return 'DejaVuSans'
 
 # 转换文本为PDF
 def text_to_pdf(text, font_name='Chinese'):
     # 创建一个临时文件来保存PDF
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-        # 创建PDF文档
-        c = canvas.Canvas(tmp_file.name, pagesize=A4)
-        width, height = A4
-        
-        # 设置字体和大小
-        c.setFont(font_name, 12)
-        
-        # 分割文本为行
-        lines = text.split('\n')
-        y = height - 50  # 起始位置（上边距）
-        line_height = 15  # 行高
-        margin = 50  # 左右边距
-        
-        # 写入每一行文本
-        for line in lines:
-            if y < 50:  # 如果到达页面底部
-                c.showPage()  # 创建新页面
-                y = height - 50  # 重置y坐标
-                c.setFont(font_name, 12)  # 重新设置字体
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            # 创建PDF文档
+            c = canvas.Canvas(tmp_file.name, pagesize=A4)
+            width, height = A4
             
-            # 处理过长的行
-            while len(line) * 7 > (width - 2 * margin):  # 估算行宽
-                # 按照页面宽度截断行
-                break_point = int((width - 2 * margin) / 7)
-                c.drawString(margin, y, line[:break_point])
-                line = line[break_point:]
-                y -= line_height
+            # 设置字体和大小
+            c.setFont(font_name, 12)
+            
+            # 分割文本为行
+            lines = text.split('\n')
+            y = height - 50  # 起始位置（上边距）
+            line_height = 15  # 行高
+            margin = 50  # 左右边距
+            
+            # 写入每一行文本
+            for line in lines:
+                if y < 50:  # 如果到达页面底部
+                    c.showPage()  # 创建新页面
+                    y = height - 50  # 重置y坐标
+                    c.setFont(font_name, 12)  # 重新设置字体
                 
-                if y < 50:  # 检查是否需要新页面
-                    c.showPage()
-                    y = height - 50
-                    c.setFont(font_name, 12)
+                # 处理过长的行
+                while len(line) * 7 > (width - 2 * margin):  # 估算行宽
+                    # 按照页面宽度截断行
+                    break_point = int((width - 2 * margin) / 7)
+                    c.drawString(margin, y, line[:break_point])
+                    line = line[break_point:]
+                    y -= line_height
+                    
+                    if y < 50:  # 检查是否需要新页面
+                        c.showPage()
+                        y = height - 50
+                        c.setFont(font_name, 12)
+                
+                # 写入剩余的行或原始行
+                if line:
+                    c.drawString(margin, y, line)
+                    y -= line_height
             
-            # 写入剩余的行或原始行
-            if line:
-                c.drawString(margin, y, line)
-                y -= line_height
-        
-        c.save()
-        return tmp_file.name
+            c.save()
+            return tmp_file.name
+    except Exception as e:
+        logging.error(f"Error generating PDF: {e}")
+        return None
 
 def get_client_ip(request: Request) -> str:
     """获取客户端真实IP地址"""
@@ -186,7 +191,7 @@ def get_db():
 def generate_download_code():
     return ''.join(random.choices(string.digits, k=4))
 
-# 用户注册
+
 # 辅助函数：记录用户活动日志
 def log_user_activity(request, action, username, extra_info=None):
     """统一记录用户活动日志"""
@@ -196,9 +201,12 @@ def log_user_activity(request, action, username, extra_info=None):
         log_message += f", {extra_info}"
     logging.info(log_message)
 
+
+# 用户注册
 @app.post("/api/register", response_model=Token)
 def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.username == user.username).first()
+    # 用户名不能重复
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
     
@@ -214,6 +222,7 @@ def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     log_user_activity(request, "New user registered", user.username)
     
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 # 用户登录
 @app.post("/api/login", response_model=Token)
@@ -241,6 +250,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     log_user_activity(request, "Successful login", user.username)
     
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 # 用户注销
 @app.post("/api/logout")
@@ -352,6 +362,7 @@ def get_files(request: Request, current_user: User = Depends(get_current_user), 
             FileInfoResponse(
                 id=file.id,
                 filename=file.filename,
+                filepath=file.filepath,
                 upload_time=file.upload_time,
                 uploader=file.user.username,
                 is_private=file.is_private,
@@ -362,7 +373,6 @@ def get_files(request: Request, current_user: User = Depends(get_current_user), 
                 can_preview=is_file_previewable(file.file_type)
             )
         )
-    
     return file_list
 
 # 获取文件信息
@@ -398,9 +408,8 @@ async def get_file_info(
         if not file:
             raise HTTPException(status_code=404, detail="文件不存在")
         
-        # 如果是私密文件，需要验证访问权限
-        if file.is_private:
-            check_file_access_permission(current_user, file, download_code)
+        # 如果是私密文件，需要验证访问权限 - 不需要检查权限
+        # check_file_access_permission(current_user, file, download_code)
 
         # 记录文件信息访问
         log_file_access(request, "info accessed", file_id, file.filename, current_user)
@@ -409,6 +418,7 @@ async def get_file_info(
         return {
             "id": file.id,
             "filename": file.filename,
+            "filepath": file.filepath,
             "upload_time": file.upload_time,
             "uploader": file.user.username,
             "is_private": file.is_private,
@@ -500,7 +510,6 @@ async def download_file(
         logging.error(f"Error downloading file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="文件下载失败，请稍后重试")
 
-# 删除重复的get_file_info路由，已经在上面定义过了
 
 # 获取用户信息
 @app.get("/api/user/me")
@@ -509,6 +518,7 @@ def get_user_info(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "id": current_user.id
     }
+
 
 # 预览文件
 @app.get("/api/files/{file_id}/preview", response_class=HTMLResponse)
@@ -521,6 +531,7 @@ async def preview_file(
 ):
     """预览文件"""
     file = db.query(FileInfo).filter(FileInfo.id == file_id).first()
+    
     if not file:
         raise HTTPException(status_code=404, detail="文件不存在")
     
@@ -528,7 +539,7 @@ async def preview_file(
     if file.is_private:
         # 私密文件需要检查权限
         check_file_access_permission(current_user, file, download_code)
-    
+        
     if not os.path.exists(file.filepath):
         raise HTTPException(status_code=404, detail="文件不存在")
     
@@ -536,8 +547,6 @@ async def preview_file(
     if not is_file_previewable(file.file_type):
         raise HTTPException(status_code=400, detail="此文件类型不支持预览")
     
-    # 记录预览信息
-    log_file_access(request, "previewed", file_id, file.filename, current_user)
     
     try:
         # 确保文件路径是绝对路径
@@ -547,6 +556,7 @@ async def preview_file(
 
         # 根据文件类型处理预览
         if file.file_type.startswith('image/'):
+            
             # 图片文件
             return FileResponse(
                 path=str(file_path),
@@ -579,15 +589,18 @@ async def preview_file(
                 pdf_path = text_to_pdf(content, font_name)
                 
                 # 返回生成的PDF文件
-                return FileResponse(
-                    pdf_path,
+                response = FileResponse(
+                    path=str(pdf_path),
                     media_type='application/pdf',
-                    filename=f"{file.filename}.pdf",
+                    filename=f"{os.path.basename(file.filename)}.pdf",
                     headers={
-                        'Content-Disposition': f'inline; filename="{file.filename}.pdf"'
+                        'Content-Disposition': f'inline; filename="{os.path.basename(file.filename)}.pdf"'
                     },
-                    background=BackgroundTasks(lambda: os.unlink(pdf_path))  # 清理临时PDF文件
+                    # background=BackgroundTasks(lambda: os.unlink(str(pdf_path)))  # 清理临时PDF文件
                 )
+                tasks = BackgroundTasks()
+                tasks.add_task(os.unlink, str(pdf_path))  # 清理临时PDF文件
+                return response
             except Exception as e:
                 logging.error(f"Error converting text to PDF: {str(e)}")
                 

@@ -24,14 +24,15 @@ function PreviewPage() {
   // 使用 fileUtils 中的 copyToClipboard
 
   // 检查文件是否存在并可访问
-  const checkFileExists = async (url, headers = {}) => {
-    try {
-      await axios.head(url, { headers });
-      return true;
-    } catch (error) {
-      return false;
-    }
-  };
+  // const checkFileExists = async (url, headers = {}) => {
+  //   try {
+  //     console.log('Checking file exists:', url);
+  //     await axios.head(url, { headers });
+  //     return true;
+  //   } catch (error) {
+  //     return false;
+  //   }
+  // };
 
   // 获取文件基本信息
   useEffect(() => {
@@ -86,14 +87,14 @@ function PreviewPage() {
   }, [fileId, downloadCode, downloadForm]);
 
   // 处理文件预览
-  const handlePreview = async () => {
+  const handlePreview = async (inputCode = null) => {
     if (!fileInfo) return;
 
     try {
       setLoading(true);
       
       // 如果是私密文件且没有下载码
-      if (fileInfo.is_private && !savedDownloadCode) {
+      if (fileInfo.is_private && !savedDownloadCode && !inputCode) {
         setIsPreviewMode(true);
         setCodeModalVisible(true);
         setLoading(false);
@@ -102,8 +103,11 @@ function PreviewPage() {
 
       // 构建API URL
       let apiUrl = `/api/files/${fileId}/preview`;
-      if (savedDownloadCode) {
-        apiUrl += `?download_code=${savedDownloadCode}`;
+      const code = inputCode || savedDownloadCode;
+      if (code) {
+        apiUrl += `?download_code=${code}`;
+        // 保存有效的下载码以便后续使用
+        setSavedDownloadCode(code);
       }
 
       // 获取token（如果用户已登录）

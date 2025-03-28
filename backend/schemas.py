@@ -33,6 +33,7 @@ class FileInfo(FileInfoBase):
     file_type: Optional[str] = None
     file_size: Optional[int] = None
     downloads: Optional[int] = 0
+    filepath: Optional[str] = None
     
     class Config:
         orm_mode = True
